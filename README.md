@@ -1,6 +1,18 @@
 # Homie Scheduler Cards
 
-Lovelace cards for schedule management (boiler, climate). Work together with the **homie-scheduler-integration** in Home Assistant.
+Lovelace cards for schedule management (boiler, climate). **Requires** the [**Homie Scheduler** integration](https://github.com/positivecrash/homie-scheduler-integration) — install it first.
+
+## Screenshots
+
+| Boiler slots | Boiler status | Boiler button (duration) |
+|--------------|---------------|---------------------------|
+| ![Boiler slots](docs/images/homie-scheduler-boiler-slots-default.png) | ![Boiler status](docs/images/homie-scheduler-boiler-status-default.png) | ![Duration buttons](docs/images/homie-scheduler-boiler-duration-buttons-default.png) |
+
+| All cards (boiler) | Settings |
+|--------------------|----------|
+| ![Boiler all](docs/images/homie-scheduler-boiler-all-default.png) | ![Settings](docs/images/homie-scheduler-settings.png) |
+
+Screencast: [screencast-boiler-automation.mov](docs/images/screencast-boiler-automation.mov)
 
 ## Project Structure
 
@@ -20,9 +32,9 @@ homie-scheduler-cards/
 └── README.md
 ```
 
-## Integration (homie-scheduler-integration)
+## Integration (required)
 
-Cards read data from the **Homie Scheduler** integration. You must install and configure it first.
+Cards read data from the **[Homie Scheduler](https://github.com/positivecrash/homie-scheduler-integration)** integration. You need to [install and configure it](https://github.com/positivecrash/homie-scheduler-integration) first.
 
 **Entities created by the integration:**
 
@@ -342,7 +354,7 @@ auto_off: 120
 
 ## Requirements
 
-- **homie-scheduler-integration** installed and configured in Home Assistant
+- **[Homie Scheduler](https://github.com/positivecrash/homie-scheduler-integration)** integration installed and configured in Home Assistant
 - Home Assistant Core 2025.9 or newer
 
 ## Publishing to GitHub (first time)
