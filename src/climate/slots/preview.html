@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Slots Card Preview</title>
+  
+  <!-- Load card styles -->
+  <link rel="stylesheet" href="card-styles.css">
+  
+  <!-- Material Design Icons - only for preview -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@latest/css/materialdesignicons.min.css">
+  
+  <script type="module">
+    // Mock ha-icon component for preview only
+    // In Home Assistant, real ha-icon component will be used automatically
+    class HaIcon extends HTMLElement {
+      static get observedAttributes() {
+        return ['icon'];
+      }
+      
+      connectedCallback() {
+        this.updateIcon();
+      }
+      
+      attributeChangedCallback() {
+        this.updateIcon();
+      }
+      
+      updateIcon() {
+        const icon = this.getAttribute('icon');
+        if (icon) {
+          // Extract icon name from mdi:icon-name format
+          const iconName = icon.replace('mdi:', '');
+          // Use Material Design Icons font (only for preview)
+          this.innerHTML = `<i class="mdi mdi-${iconName}"></i>`;
+          this.style.display = 'inline-flex';
+          this.style.alignItems = 'center';
+          this.style.justifyContent = 'center';
+          this.style.color = 'inherit';
+        }
+      }
+    }
+    
+    if (!customElements.get('ha-icon')) {
+      customElements.define('ha-icon', HaIcon);
+    }
+  </script>
+  
+  <style>
+    /* Icon sizing for preview */
+    ha-icon {
+      --mdc-icon-size: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    ha-icon i.mdi {
+      font-size: var(--mdc-icon-size, 24px);
+      line-height: 1;
+      display: inline-block;
+    }
+  </style>
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+      background: #f0f0f0;
+      padding: 20px;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .container {
+      max-width: 500px;
+      width: 100%;
+    }
+
+    .preview-header {
+      background: white;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .preview-header h1 {
+      font-size: 24px;
+      margin-bottom: 8px;
+      color: #212121;
+    }
+    
+    .preview-header h1::before {
+      content: '📅 ';
+    }
+
+    .preview-header p {
+      color: #757575;
+      font-size: 14px;
+    }
+
+
+    /* Home Assistant CSS Variables */
+    :root {
+      --primary-color: #03a9f4;
+      --accent-color: #ff9800;
+      --divider-color: #e0e0e0;
+      --primary-text-color: #212121;
+      --secondary-text-color: #757575;
+      --disabled-text-color: #9e9e9e;
+      --error-color: #f44336;
+      --warning-color: #ff9800;
+      --success-color: #4caf50;
+      --info-color: #2196f3;
+      --primary-background-color: #fafafa;
+      --secondary-background-color: #f5f5f5;
+      --card-background-color: #ffffff;
+      --paper-card-background-color: #ffffff;
+    }
+
+    body.dark {
+      background: #111111;
+    }
+
+    body.dark :root {
+      --primary-color: #03a9f4;
+      --accent-color: #ff9800;
+      --divider-color: #3a3a3a;
+      --primary-text-color: #e1e1e1;
+      --secondary-text-color: #9b9b9b;
+      --disabled-text-color: #6f6f6f;
+      --error-color: #f44336;
+      --warning-color: #ff9800;
+      --success-color: #4caf50;
+      --info-color: #2196f3;
+      --primary-background-color: #111111;
+      --secondary-background-color: #1c1c1c;
+      --card-background-color: #1c1c1c;
+      --paper-card-background-color: #1c1c1c;
+    }
+
+    body.dark .preview-header {
+      background: #1c1c1c;
+      color: #e1e1e1;
+    }
+
+    body.dark .preview-header h1 {
+      color: #e1e1e1;
+    }
+
+    body.dark .preview-header p {
+      color: #9b9b9b;
+    }
+
+    /* Mock ha-card element */
+    ha-card {
+      display: block;
+      background: var(--card-background-color);
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    body.dark ha-card {
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="preview-header">
+      <h1>📅 Slots Card Preview</h1>
+      <p>Test and develop card layout without Home Assistant</p>
+    </div>
+
+    <!-- Card Container -->
+    <homie-schedule-slots id="card"></homie-schedule-slots>
+  </div>
+
+  <!-- Embedded templates for preview (to avoid CORS issues with file:// protocol) -->
+  <div id="embedded-templates" style="display: none;">
+  <!-- Main Header -->
+  <div class="main-header">
+    <div class="header-left">
+      <div class="header-icon {{ENABLED_CLASS}}" data-action="toggle-enabled" title="Toggle scheduler">
+        <ha-icon icon="mdi:toggle-switch-variant-off"></ha-icon>
+      </div>
+      <div class="header-text">
+        <div class="header-title">{{TITLE}}</div>
+        <div class="header-status">{{STATUS_TEXT}}</div>
+      </div>
+    </div>
+    <button class="add-button" data-action="open-add-popup">
+      <ha-icon icon="mdi:plus"></ha-icon>
+    </button>
+  </div>
+  
+  <!-- Slots List -->
+  <div class="slots-container">
+    {{ITEMS_CONTENT}}
+  </div>
+  
+  <!-- Add Slot Popup -->
+  <div class="popup-overlay" id="add-popup" style="display: none;">
+    <div class="popup-content">
+      <div class="popup-header">
+        <ha-icon icon="mdi:calendar-clock"></ha-icon>
+        <span class="popup-title">Add Schedule Slot</span>
+        <button class="popup-close" data-action="close-popup">
+          <ha-icon icon="mdi:close"></ha-icon>
+        </button>
+      </div>
+      
+      <div class="popup-body">
+        <!-- Time Input -->
+        <div class="popup-field">
+          <label>
+            <ha-icon icon="mdi:clock-outline"></ha-icon>
+            <span>Start Time</span>
+          </label>
+          <div class="time-selects">
+            <select class="popup-time-hours" id="popup-time-hours">
+              <option value="00">00</option>
+              <option value="01">01</option>
+              <option value="02">02</option>
+              <option value="03">03</option>
+              <option value="04">04</option>
+              <option value="05">05</option>
+              <option value="06">06</option>
+              <option value="07">07</option>
+              <option value="08" selected>08</option>
+              <option value="09">09</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+              <option value="12">12</option>
+              <option value="13">13</option>
+              <option value="14">14</option>
+              <option value="15">15</option>
+              <option value="16">16</option>
+              <option value="17">17</option>
+              <option value="18">18</option>
+              <option value="19">19</option>
+              <option value="20">20</option>
+              <option value="21">21</option>
+              <option value="22">22</option>
+              <option value="23">23</option>
+            </select>
+            <span class="time-separator">:</span>
+            <select class="popup-time-minutes" id="popup-time-minutes">
+              <option value="00" selected>00</option>
+              <option value="05">05</option>
+              <option value="10">10</option>
+              <option value="15">15</option>
+              <option value="20">20</option>
+              <option value="25">25</option>
+              <option value="30">30</option>
+              <option value="35">35</option>
+              <option value="40">40</option>
+              <option value="45">45</option>
+              <option value="50">50</option>
+              <option value="55">55</option>
+            </select>
+          </div>
+        </div>
+        
+        <!-- Duration Select -->
+        <div class="popup-field">
+          <label>
+            <ha-icon icon="mdi:timer-outline"></ha-icon>
+            <span>Duration</span>
+          </label>
+          <select class="popup-duration-select" id="popup-duration">
+            <option value="30">30 minutes</option>
+            <option value="60">60 minutes</option>
+          </select>
+        </div>
+        
+        <!-- Weekdays Selection -->
+        <div class="popup-field">
+          <label>
+            <ha-icon icon="mdi:calendar"></ha-icon>
+            <span>Days of Week</span>
+          </label>
+          <div class="popup-weekdays">
+            <div class="popup-weekday" data-day="0">Mon</div>
+            <div class="popup-weekday" data-day="1">Tue</div>
+            <div class="popup-weekday" data-day="2">Wed</div>
+            <div class="popup-weekday" data-day="3">Thu</div>
+            <div class="popup-weekday" data-day="4">Fri</div>
+            <div class="popup-weekday" data-day="5">Sat</div>
+            <div class="popup-weekday" data-day="6">Sun</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="popup-footer">
+        <button class="popup-button cancel" data-action="close-popup">Cancel</button>
+        <button class="popup-button save" data-action="save-slot">Save</button>
+      </div>
+    </div>
+  </div>
+
+<!-- Slot Item Template -->
+<template id="slot-item-template">
+  <div class="slot-card {{DISABLED_CLASS}}" data-item-id="{{ITEM_ID}}">
+    <div class="slot-header">
+      <div class="slot-icon {{ICON_CLASS}}" data-action="toggle-item" title="Toggle slot">
+        <ha-icon icon="mdi:calendar-clock"></ha-icon>
+      </div>
+      <div class="slot-info">
+        <div class="slot-name">Slot {{SLOT_NUMBER}}</div>
+        <div class="slot-status">{{SLOT_STATUS}}</div>
+      </div>
+      <button class="slot-expand" data-action="toggle-expand" title="Expand/collapse details">
+        <ha-icon icon="mdi:chevron-down"></ha-icon>
+      </button>
+    </div>
+    
+    <div class="slot-expandable">
+      <div class="slot-details">
+        <div class="slot-time">
+          <ha-icon icon="mdi:clock-outline"></ha-icon>
+          <div class="time-selects">
+            <select class="slot-time-hours" data-action="update-time-hours" data-item-id="{{ITEM_ID}}">
+              <option value="00" {{TIME_HOURS_00}}>00</option>
+              <option value="01" {{TIME_HOURS_01}}>01</option>
+              <option value="02" {{TIME_HOURS_02}}>02</option>
+              <option value="03" {{TIME_HOURS_03}}>03</option>
+              <option value="04" {{TIME_HOURS_04}}>04</option>
+              <option value="05" {{TIME_HOURS_05}}>05</option>
+              <option value="06" {{TIME_HOURS_06}}>06</option>
+              <option value="07" {{TIME_HOURS_07}}>07</option>
+              <option value="08" {{TIME_HOURS_08}}>08</option>
+              <option value="09" {{TIME_HOURS_09}}>09</option>
+              <option value="10" {{TIME_HOURS_10}}>10</option>
+              <option value="11" {{TIME_HOURS_11}}>11</option>
+              <option value="12" {{TIME_HOURS_12}}>12</option>
+              <option value="13" {{TIME_HOURS_13}}>13</option>
+              <option value="14" {{TIME_HOURS_14}}>14</option>
+              <option value="15" {{TIME_HOURS_15}}>15</option>
+              <option value="16" {{TIME_HOURS_16}}>16</option>
+              <option value="17" {{TIME_HOURS_17}}>17</option>
+              <option value="18" {{TIME_HOURS_18}}>18</option>
+              <option value="19" {{TIME_HOURS_19}}>19</option>
+              <option value="20" {{TIME_HOURS_20}}>20</option>
+              <option value="21" {{TIME_HOURS_21}}>21</option>
+              <option value="22" {{TIME_HOURS_22}}>22</option>
+              <option value="23" {{TIME_HOURS_23}}>23</option>
+            </select>
+            <span class="time-separator">:</span>
+            <select class="slot-time-minutes" data-action="update-time-minutes" data-item-id="{{ITEM_ID}}">
+              <option value="00" {{TIME_MINUTES_00}}>00</option>
+              <option value="05" {{TIME_MINUTES_05}}>05</option>
+              <option value="10" {{TIME_MINUTES_10}}>10</option>
+              <option value="15" {{TIME_MINUTES_15}}>15</option>
+              <option value="20" {{TIME_MINUTES_20}}>20</option>
+              <option value="25" {{TIME_MINUTES_25}}>25</option>
+              <option value="30" {{TIME_MINUTES_30}}>30</option>
+              <option value="35" {{TIME_MINUTES_35}}>35</option>
+              <option value="40" {{TIME_MINUTES_40}}>40</option>
+              <option value="45" {{TIME_MINUTES_45}}>45</option>
+              <option value="50" {{TIME_MINUTES_50}}>50</option>
+              <option value="55" {{TIME_MINUTES_55}}>55</option>
+            </select>
+          </div>
+        </div>
+        <div class="slot-duration">
+          <ha-icon icon="mdi:timer-outline"></ha-icon>
+          <select class="slot-duration-select" data-action="update-duration">
+            <option value="30" {{DURATION_30_SELECTED}}>30</option>
+            <option value="60" {{DURATION_60_SELECTED}}>60</option>
+          </select>
+        </div>
+      </div>
+      
+      <div class="slot-weekdays-wrapper">
+        <ha-icon icon="mdi:calendar" class="slot-weekdays-icon"></ha-icon>
+        <div class="slot-weekdays">
+          <div class="slot-weekday {{WEEKDAY_0_CLASS}}" data-action="toggle-weekday" data-weekday="0">Mon</div>
+          <div class="slot-weekday {{WEEKDAY_1_CLASS}}" data-action="toggle-weekday" data-weekday="1">Tue</div>
+          <div class="slot-weekday {{WEEKDAY_2_CLASS}}" data-action="toggle-weekday" data-weekday="2">Wed</div>
+          <div class="slot-weekday {{WEEKDAY_3_CLASS}}" data-action="toggle-weekday" data-weekday="3">Thu</div>
+          <div class="slot-weekday {{WEEKDAY_4_CLASS}}" data-action="toggle-weekday" data-weekday="4">Fri</div>
+          <div class="slot-weekday {{WEEKDAY_5_CLASS}}" data-action="toggle-weekday" data-weekday="5">Sat</div>
+          <div class="slot-weekday {{WEEKDAY_6_CLASS}}" data-action="toggle-weekday" data-weekday="6">Sun</div>
+        </div>
+      </div>
+      
+      <button class="slot-delete" data-action="delete-item">
+        <ha-icon icon="mdi:delete"></ha-icon>
+        <span>Remove Slot {{SLOT_NUMBER}}</span>
+      </button>
+    </div>
+  </div>
+</template>
+
+  </div>
+
+  <!-- Use DEV version with external styles and HTML template -->
+  <script src="card-script.js"></script>
+  
+  <script>
+    // Mock Home Assistant object with homie-schedule integration
+    const now = new Date();
+    const nextRun = new Date(now);
+    nextRun.setHours(22, 10, 0, 0); // Next run at 22:10 today or tomorrow
+    
+    const mockHass = {
+      states: {
+        'switch.boiler': {
+          entity_id: 'switch.boiler',
+          state: 'off', // Entity is off for preview
+          attributes: {}
+        },
+        'sensor.scheduler_bridge': {
+          entity_id: 'sensor.scheduler_bridge',
+          state: 'active',
+          attributes: {
+            integration: 'homie_scheduler',
+            entry_id: 'test-entry-id-123',
+            entity_ids: ['switch.boiler'],
+            items: [
+              {
+                id: '1',
+                entity_id: 'switch.boiler',
+                enabled: true,
+                time: '06:00',
+                duration: 30,
+                weekdays: [0, 1, 2, 3, 4]
+              },
+              {
+                id: '2',
+                entity_id: 'switch.boiler',
+                enabled: false,
+                time: '18:00',
+                duration: 60,
+                weekdays: [5, 6]
+              }
+            ],
+            next_run: nextRun.toISOString(), // Next scheduled run
+            next_run_duration: 30 // Duration in minutes
+          }
+        }
+      },
+      callService: async (domain, service, data) => {
+        console.log('Service call:', domain, service, data);
+        
+        if (domain === 'homie_scheduler') {
+          const bridgeSensor = mockHass.states['sensor.scheduler_bridge'];
+          const items = bridgeSensor.attributes.items;
+          
+          switch(service) {
+            case 'add_item':
+              items.push({
+                id: Date.now().toString(),
+                entity_id: data.entity_id,
+                enabled: data.enabled,
+                time: data.time,
+                duration: data.duration,
+                weekdays: data.weekdays
+              });
+              // Update entity_ids list if needed
+              if (!bridgeSensor.attributes.entity_ids.includes(data.entity_id)) {
+                bridgeSensor.attributes.entity_ids.push(data.entity_id);
+              }
+              break;
+              
+            case 'update_item':
+              const itemIndex = items.findIndex(i => i.id === data.id);
+              if (itemIndex !== -1) {
+                items[itemIndex] = { ...items[itemIndex], ...data };
+              }
+              break;
+              
+            case 'delete_item':
+              const deleteIndex = items.findIndex(i => i.id === data.id);
+              if (deleteIndex !== -1) {
+                items.splice(deleteIndex, 1);
+              }
+              break;
+              
+            case 'toggle_enabled':
+              bridgeSensor.state = bridgeSensor.state === 'active' ? 'inactive' : 'active';
+              break;
+          }
+          
+          // For update_item, don't trigger full re-render - _updateItem already handles it
+          // For add/delete, need full re-render
+          if (service !== 'update_item') {
+            setTimeout(() => {
+              card.hass = { ...mockHass };
+            }, 100);
+          }
+        }
+        
+        return Promise.resolve();
+      }
+    };
+
+    // Initialize card
+    const card = document.getElementById('card');
+    card.setConfig({
+      entity: 'switch.boiler',
+      title: 'Water Heater Scheduler',
+      icon: 'mdi:toggle-switch-variant-off'
+    });
+    card.hass = mockHass;
+
+    // Log for debugging
+    console.log('Preview initialized with mock hass:', mockHass);
+  </script>
+</body>
+</html>

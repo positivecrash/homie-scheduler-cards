@@ -1,0 +1,122 @@
+/**
+ * Homie Cards - Custom Style Overrides (шаблон)
+ * 
+ * Этот файл переопределяет CSS переменные для всех Homie карточек
+ * поверх любой темы Home Assistant.
+ * 
+ * Использование:
+ * 1. Скопируй этот файл в конфиг HA: /config/www/homie/homie-custom-styles.css
+ * 2. Подключи через Lovelace Resources: URL /local/homie/homie-custom-styles.css, Type: Stylesheet
+ * 3. Раскомментируй нужные блоки и измени значения переменных
+ */
+
+/* ============================================
+ * Глобальные переменные для всех Homie карточек
+ * ============================================
+ * 
+ * Раскомментируй нужный блок и измени значения переменных
+ */
+
+/*
+ * BUTTON CARDS — переменные задаём на home-assistant (наследуются в shadow DOM)
+ */
+/*
+home-assistant {
+  --homie-button-accent: #4caf50;
+  --homie-button-radius: 16px;
+  --homie-button-bg-inactive: rgba(255, 255, 255, 0.12);
+  --homie-button-bg-active: #4caf50;
+  --homie-button-bg-disabled: rgba(255, 255, 255, 0.04);
+  --homie-button-text-inactive: #ffffff;
+  --homie-button-text-active: #ffffff;
+  --homie-button-text-disabled: rgba(255,255,255,0.3);
+  --homie-button-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  --homie-button-shadow-active: 0 4px 12px rgba(76,175,80,0.4);
+}
+*/
+
+/* ============================================
+ * ВАЖНО: Карточки Homie рендерятся ВНУТРИ shadow DOM элемента <home-assistant>.
+ * Селекторы homie-scheduler-boiler-button и т.п. в основном document не видны.
+ * CSS-переменные задаём на home-assistant — они наследуются внутрь shadow DOM.
+ * ============================================ */
+
+/*
+ * SLOTS CARDS — переменные на home-assistant
+ */
+/*
+home-assistant {
+  --homie-slots-accent: #4caf50;
+  --homie-slots-bg: var(--ha-card-background);
+  --homie-slots-radius: 12px;
+  --homie-slots-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --homie-slots-text: var(--primary-text-color);
+  --homie-slots-text-secondary: var(--secondary-text-color);
+  --homie-slots-text-on-accent: #ffffff;
+  --homie-slots-disabled: var(--disabled-color);
+
+  /* Popup (.popup-content) defaults/overrides */
+  --homie-slots-popup-background: var(--ha-dialog-background);
+  --homie-slots-popup-color: var(--primary-text-color);
+  --homie-slots-popup-backdrop-filter: var(--ha-card-backdrop-filter, none);
+  --homie-slots-popup-box-shadow: var(--ha-card-box-shadow, none);
+  --homie-slots-popup-border-radius: var(--ha-card-border-radius, 16px);
+}
+*/
+
+/*
+ * STATUS CARD — переменные на home-assistant
+ */
+/*
+home-assistant {
+  --homie-status-accent: #ff9800;
+  --homie-status-bg: var(--ha-card-background);
+  --homie-status-radius: 8px;
+  --homie-status-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  --homie-status-text: var(--primary-text-color);
+  --homie-status-text-secondary: var(--secondary-text-color);
+  --homie-status-text-on-accent: #ffffff;
+  --homie-status-disabled: var(--disabled-color);
+}
+*/
+
+/* ============================================
+ * Примеры переопределений для разных карточек
+ * ============================================ */
+
+/* Только для boiler schedule button */
+/*
+home-assistant {
+  --homie-button-accent: #ff5722;
+  --homie-button-radius: 16px;
+}
+*/
+
+/* Только для slots карточек */
+/*
+home-assistant {
+  --homie-slot-radius: 8px;
+}
+*/
+
+/* ============================================
+ * Адаптация под разные темы (опционально)
+ * ============================================ */
+
+/* Для светлых тем */
+/*
+@media (prefers-color-scheme: light) {
+  home-assistant {
+    --homie-button-accent: #1976d2;
+  }
+}
+*/
+
+/* Для темных тем */
+/*
+@media (prefers-color-scheme: dark) {
+  home-assistant {
+    --homie-button-accent: #42a5f5;
+  }
+}
+*/

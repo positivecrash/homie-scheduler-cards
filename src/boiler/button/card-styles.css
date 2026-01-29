@@ -1,0 +1,213 @@
+/**
+ * Boiler Schedule Button Card - Simplified Styles
+ * 
+ * Simple HA-style button
+ */
+
+:host {
+  display: block;
+  margin: 0 !important;
+  
+  /* Button design tokens - паттерн как в Mushroom cards */
+  /* Кнопка = карточка, поэтому использует фон и тени карточки */
+  --_bg: var(--ha-card-background, var(--card-background-color, #1c1c1c));
+  --_radius: var(--ha-card-border-radius, 12px);
+  --_shadow: var(--ha-card-box-shadow, none);
+  --_backdrop-filter: var(--ha-card-backdrop-filter, none);
+  --_border-color: var(--divider-color, rgba(255, 255, 255, 0.12));
+  
+  --_text: var(--primary-text-color, #fff);
+  --_text-secondary: var(--secondary-text-color, rgba(255,255,255,0.7));
+  
+  --_accent: var(--homie-button-accent, var(--primary-color, #03a9f4));
+  --_disabled-opacity: 0.5;
+  
+  /* Inactive = обычный фон карточки, Active = акцентный цвет */
+  /* С возможностью переопределения через --homie-button-* переменные */
+  --_button-bg-inactive: var(--homie-button-bg-inactive, var(--_bg));
+  --_button-bg-active: var(--homie-button-bg-active, var(--_accent));
+  --_button-bg-disabled: var(--homie-button-bg-disabled, var(--_bg));
+  
+  /* Текст на inactive кнопке = акцентный цвет (primary-color, обычно синий) */
+  --_button-text-inactive: var(--homie-button-text-inactive, var(--primary-color, #03a9f4));
+  --_button-text-active: var(--homie-button-text-active, var(--text-primary-color, #fff));
+  --_button-text-disabled: var(--homie-button-text-disabled, var(--disabled-text-color, rgba(255,255,255,0.5)));
+  
+  --_button-radius: var(--homie-button-radius, var(--_radius));
+  --_button-shadow: var(--homie-button-shadow, var(--_shadow));
+  --_button-shadow-active: var(--homie-button-shadow-active, var(--_shadow));
+  --_button-backdrop-filter: var(--homie-button-backdrop-filter, var(--_backdrop-filter));
+  --_button-border-color: var(--homie-button-border-color, var(--_border-color));
+}
+
+.schedule-button {
+  width: 100%;
+  height: 100%;
+  padding: 12px 16px;
+  border-radius: var(--_button-radius);
+  background: var(--_button-bg-inactive);
+  border: 1px solid var(--_button-border-color);
+  color: var(--_button-text-inactive);
+  box-shadow: var(--_button-shadow);
+  -webkit-backdrop-filter: var(--_button-backdrop-filter);
+  backdrop-filter: var(--_button-backdrop-filter);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  transition: all 0.2s ease-in-out;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.button-label {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.9;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.label-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.9;
+  flex-shrink: 0;  /* Prevent icon from shrinking */
+  margin-right: 4px;  /* Additional spacing */
+}
+
+.button-duration {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.2;
+}
+
+.duration-number {
+  font-size: 40px;
+  font-weight: 600;
+}
+
+.duration-unit {
+  font-size: 18px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.schedule-button:hover:not(.disabled) {
+  opacity: 0.9;
+}
+
+.schedule-button:active:not(.disabled) {
+  opacity: 0.8;
+}
+
+.schedule-button.active {
+  background: var(--_button-bg-active);
+  color: var(--_button-text-active);
+  box-shadow: var(--_button-shadow-active);
+}
+
+.schedule-button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--_button-bg-disabled);
+  color: var(--_button-text-disabled);
+  box-shadow: none;
+}
+
+/* Active button that is also disabled - keep active color but make it non-clickable */
+.schedule-button.active.disabled {
+  background: var(--_button-bg-active);
+  color: var(--_button-text-active);
+  opacity: 1;  /* Keep full opacity for active button */
+  cursor: not-allowed;
+  box-shadow: var(--_button-shadow-active);
+}
+
+/* Recirculation mode styles */
+.schedule-button.recirculation {
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+}
+
+.recirculation-icon {
+  opacity: 1 !important; /* Override parent opacity */
+  color: inherit; /* Inherit text color from button */
+  --mdc-icon-size: 50px;
+  transition: transform 0.3s ease, opacity 0.2s ease;
+  display: block;
+}
+
+
+/* Hover effect for icon - removed for recirculation */
+
+/* Active state for icon */
+.schedule-button.recirculation.active .recirculation-icon {
+  opacity: 1 !important;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+.recirculation-label-top,
+.recirculation-label-bottom {
+  font-size: 12px;
+  font-weight: 300; /* Thin text */
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  opacity: 0.9;
+  line-height: 1.2;
+}
+
+.recirculation-label-top {
+  margin-bottom: 4px;
+}
+
+.recirculation-label-bottom {
+  margin-top: 4px;
+}
+
+/* ============================================
+ * Кастомизация через CSS переменные
+ * ============================================
+ * 
+ * Можно переопределить в themes.yaml или через card-mod:
+ * 
+ * homie-scheduler-boiler-button {
+ *   --homie-button-bg-inactive: #2c2c2c;
+ *   --homie-button-bg-active: #4caf50;
+ *   --homie-button-bg-disabled: #1a1a1a;
+ *   
+ *   --homie-button-text-inactive: #ffffff;
+ *   --homie-button-text-active: #ffffff;
+ *   --homie-button-text-disabled: rgba(255,255,255,0.3);
+ * 
+ *   --homie-button-backdrop-filter: var(--ha-card-backdrop-filter, none);
+ *   --homie-button-border-color: var(--divider-color, rgba(255, 255, 255, 0.12));
+ *   
+ *   --homie-button-radius: 16px;
+ *   --homie-button-shadow: 0 2px 4px rgba(0,0,0,0.1);
+ *   --homie-button-shadow-active: 0 4px 12px rgba(76,175,80,0.4);
+ * }
+ */

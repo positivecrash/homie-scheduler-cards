@@ -1,0 +1,775 @@
+/**
+ * Boiler Scheduler Card - Styles
+ * All variables in :host; common/slot/popup/duration use them (overridable via --homie-slots-*).
+ */
+
+:host {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  --circular-button-size: var(--mdc-icon-button-size, 40px);
+
+  /* Card (header, slot card) */
+  --_accent: var(--homie-slots-accent, var(--primary-color, #03a9f4));
+  --_bg: var(--homie-slots-bg, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));
+  --_radius: var(--homie-slots-radius, var(--ha-card-border-radius, 8px));
+  --_shadow: var(--homie-slots-shadow, var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1)));
+  --_text: var(--homie-slots-text, var(--primary-text-color, #212121));
+  --_text-secondary: var(--homie-slots-text-secondary, var(--secondary-text-color, #757575));
+  --_text-on-accent: var(--homie-slots-text-on-accent, var(--text-primary-on-background, #ffffff));
+  --_disabled-color: var(--homie-slots-disabled, var(--disabled-color, var(--disabled-text-color, #9e9e9e)));
+
+  /* Select */
+  --_bg-select: var(--homie-slots-bg-select, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));
+  --_divider-select: var(--homie-slots-divider-select, var(--divider-color, rgba(0, 0, 0, 0.12)));
+  --_text-select: var(--homie-slots-text-select, var(--primary-text-color, #212121));
+  --_radius-select: var(--homie-slots-radius-select, var(--mdc-shape-small, 4px));
+  --_focus-ring: var(--homie-slots-focus-ring, 0 0 0 2px rgba(3, 169, 244, 0.1));
+
+  /* Input, buttons, slot, weekday, duration */
+  --_padding-input-vertical: var(--homie-slots-padding-input-vertical, var(--mdc-shape-small, 4px));
+  --_padding-input-horizontal: var(--homie-slots-padding-input-horizontal, var(--mdc-shape-small, 8px));
+  --_border-input: var(--homie-slots-border-input, 1px solid var(--_divider));
+  --_radius-input: var(--homie-slots-radius-input, var(--_radius-small));
+  --_divider: var(--homie-slots-divider, var(--divider-color, rgba(0, 0, 0, 0.12)));
+  --_radius-small: var(--homie-slots-radius-small, var(--mdc-shape-small, 4px));
+  --_radius-medium: var(--homie-slots-radius-medium, var(--mdc-shape-medium, 8px));
+  --_secondary-bg: var(--homie-slots-secondary-bg, var(--secondary-background-color, #f5f5f5));
+  --_error-color: var(--homie-slots-error-color, var(--error-color, #f44336));
+
+  /* Button outline */
+  --_button-outline-padding: var(--homie-slots-button-outline-padding, var(--mdc-button-horizontal-padding, 16px));
+  --_button-outline-margin-top: var(--homie-slots-button-outline-margin-top, var(--mdc-layout-grid-gutter, 12px));
+  --_button-outline-radius: var(--homie-slots-button-outline-radius, var(--_radius-medium));
+  --_button-outline-bg: var(--homie-slots-button-outline-bg, transparent);
+  --_button-outline-border: var(--homie-slots-button-outline-border, 2px solid var(--_accent));
+  --_button-outline-color: var(--homie-slots-button-outline-color, var(--_accent));
+  --_button-outline-font-size: var(--homie-slots-button-outline-font-size, var(--mdc-typography-button-font-size, 14px));
+  --_button-outline-font-weight: var(--homie-slots-button-outline-font-weight, var(--mdc-typography-button-font-weight, 900));
+  --_button-outline-letter-spacing: var(--homie-slots-button-outline-letter-spacing, var(--mdc-typography-button-letter-spacing, 0em));
+  --_button-outline-min-height: var(--homie-slots-button-outline-min-height, var(--mdc-button-height, 36px));
+  --_button-outline-hover-shadow: var(--homie-slots-button-outline-hover-shadow, 0 2px 8px rgba(3, 169, 244, 0.3));
+  --_button-outline-active-transform: var(--homie-slots-button-outline-active-transform, scale(0.98));
+  --_button-outline-active-shadow: var(--homie-slots-button-outline-active-shadow, 0 1px 4px rgba(3, 169, 244, 0.2));
+
+  /* Popup */
+  --_popup-bg: var(--homie-slots-popup-background, var(--ha-dialog-background, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)))));
+  --_popup-color: var(--homie-slots-popup-color, var(--primary-text-color, #212121));
+  --_popup-backdrop-filter: var(--homie-slots-popup-backdrop-filter, var(--ha-card-backdrop-filter, none));
+  --_popup-box-shadow: var(--homie-slots-popup-box-shadow, var(--ha-card-box-shadow, none));
+  --_popup-border-radius: var(--homie-slots-popup-border-radius, var(--ha-card-border-radius, 16px));
+  --_popup-width: var(--mdc-dialog-width, 90%);
+  --_popup-max-width: var(--mdc-dialog-max-width, 400px);
+  --_popup-min-width: var(--mdc-dialog-min-width, 0px);
+  --_popup-max-height: var(--mdc-dialog-max-height, 90vh);
+
+  color: var(--_text);
+}
+
+/* === Common / slot / popup / duration (use :host vars above) === */
+.homie-select {
+  background: var(--_bg-select);
+  border: 1px solid var(--_divider-select);
+  border-radius: var(--_radius-select);
+  color: var(--_text-select);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23999999' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--mdc-shape-small, 6px) center;
+  background-size: 12px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  padding: var(--_padding-input-vertical) var(--_padding-input-horizontal);
+  padding-right: calc(var(--_padding-input-horizontal) * 2 + 12px);
+}
+@media (prefers-color-scheme: dark) {
+  .homie-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  }
+}
+.homie-select:focus {
+  outline: none;
+  border-color: var(--_accent);
+  box-shadow: var(--_focus-ring);
+}
+.homie-select option {
+  background: var(--_bg-select);
+  color: var(--_text-select);
+}
+.homie-input {
+  width: 100%;
+  background: var(--_bg);
+  border: var(--_border-input);
+  border-radius: var(--_radius-input);
+  color: var(--_text);
+  font-size: 14px;
+  font-family: inherit;
+  padding: var(--_padding-input-vertical) var(--_padding-input-horizontal);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+.homie-input:focus {
+  outline: none;
+  border-color: var(--_accent);
+  box-shadow: var(--_focus-ring);
+}
+.homie-input::placeholder {
+  color: var(--_text-secondary);
+  opacity: 0.7;
+}
+.button-outline {
+  width: 100%;
+  padding: var(--_button-outline-padding) var(--_button-outline-padding);
+  margin-top: var(--_button-outline-margin-top);
+  border-radius: var(--_button-outline-radius);
+  background: var(--_button-outline-bg);
+  border: var(--_button-outline-border);
+  color: var(--_button-outline-color);
+  font-size: var(--_button-outline-font-size);
+  font-weight: var(--_button-outline-font-weight);
+  letter-spacing: var(--_button-outline-letter-spacing);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  min-height: var(--_button-outline-min-height);
+}
+.button-outline:hover {
+  background: var(--_accent);
+  color: var(--_text-on-accent);
+  box-shadow: var(--_button-outline-hover-shadow);
+}
+.button-outline:active {
+  transform: var(--_button-outline-active-transform);
+  box-shadow: var(--_button-outline-active-shadow);
+}
+.slot-expandable {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-out;
+}
+.slot-card.expanded .slot-expandable {
+  max-height: 500px;
+  transition: max-height 0.3s ease-in;
+  padding: var(--ha-card-header-padding, 16px) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mdc-layout-grid-gutter, 12px);
+}
+.slot-details {
+  display: flex;
+  align-items: center;
+  gap: var(--mdc-layout-grid-gutter, 16px);
+  margin-bottom: var(--mdc-layout-grid-gutter, 12px);
+  flex-wrap: wrap;
+}
+.slot-time, .slot-duration {
+  display: flex;
+  align-items: center;
+  gap: var(--mdc-layout-grid-gutter, 6px);
+  font-size: 14px;
+}
+.slot-time ha-icon, .slot-duration ha-icon {
+  --mdc-icon-size: 22px;
+  opacity: 0.9;
+}
+.slot-time .time-picker-separator {
+  color: var(--_text);
+}
+.slot-delete {
+  width: 100%;
+  padding: var(--mdc-shape-small, 10px);
+  margin-top: var(--mdc-layout-grid-gutter, 12px);
+  border-radius: var(--_radius-medium);
+  background: var(--_secondary-bg);
+  border: 1px solid var(--_divider);
+  color: var(--_error-color);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--mdc-layout-grid-gutter, 8px);
+  transition: all 0.2s;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+}
+.slot-delete:active { transform: scale(0.98); }
+.slot-delete ha-icon { --mdc-icon-size: 22px; }
+.empty-state {
+  text-align: center;
+  padding: 48px 16px;
+  color: var(--_text-secondary);
+}
+.empty-state ha-icon { --mdc-icon-size: 48px; opacity: 0.3; margin-bottom: 16px; }
+.empty-text { font-size: 14px; line-height: 20px; }
+.popup-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.popup-header {
+  display: flex;
+  align-items: center;
+  gap: var(--mdc-layout-grid-gutter, 12px);
+  padding: var(--ha-card-header-padding, 20px);
+  border-bottom: 1px solid var(--_divider);
+}
+.popup-header ha-icon { --mdc-icon-size: 28px; color: var(--_accent); }
+.popup-title { flex: 1; font-size: 18px; font-weight: 500; color: var(--_text); }
+.popup-close {
+  width: var(--circular-button-size, var(--mdc-icon-button-size, 40px));
+  height: var(--circular-button-size, var(--mdc-icon-button-size, 40px));
+  min-width: var(--circular-button-size, var(--mdc-icon-button-size, 40px));
+  min-height: var(--circular-button-size, var(--mdc-icon-button-size, 40px));
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--_text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.popup-close ha-icon { --mdc-icon-size: 24px; }
+.popup-body { padding: var(--ha-card-header-padding, 20px); }
+.popup-field { margin-bottom: 20px; }
+.popup-field:last-child { margin-bottom: 0; }
+.popup-field label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--_text);
+}
+.popup-field label ha-icon { --mdc-icon-size: 24px; color: var(--_accent); }
+.popup-footer {
+  display: flex;
+  gap: var(--mdc-layout-grid-gutter, 12px);
+  padding: var(--ha-card-header-padding, 20px);
+  border-top: 1px solid var(--_divider);
+}
+.popup-button {
+  flex: 1;
+  padding: var(--mdc-shape-small, 12px) var(--mdc-shape-medium, 24px);
+  border: none;
+  border-radius: var(--_radius-medium);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+.popup-button.cancel { background: var(--_secondary-bg); color: var(--_text); }
+.popup-button.save { background: var(--_accent); color: var(--_text-on-accent); }
+.popup-button:active { transform: scale(0.98); }
+.time-selects { display: flex; align-items: center; gap: 8px; width: 100%; }
+.popup-time-hours, .popup-time-minutes { flex: 1; }
+.time-separator { font-size: 18px; font-weight: 500; color: var(--_text-secondary); user-select: none; }
+.slot-time .time-selects { display: flex; align-items: center; gap: 6px; width: auto; }
+.slot-time .time-separator { font-size: 14px; color: var(--_text); }
+.weekday-mode-selector { display: flex; gap: 8px; margin-bottom: 12px; }
+.weekday-mode-btn {
+  flex: 1;
+  padding: var(--mdc-shape-small, 10px);
+  border: 2px solid var(--_divider);
+  border-radius: var(--_radius-medium);
+  background: var(--_secondary-bg);
+  color: var(--_text-secondary);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+  font-family: inherit;
+}
+.weekday-mode-btn.active, .weekday-mode-btn:hover {
+  background: var(--_accent);
+  border-color: var(--_accent);
+  color: var(--_text-on-accent);
+}
+.weekday-mode-btn:hover { opacity: 0.8; }
+.popup-weekdays { display: flex; gap: 8px; flex-wrap: wrap; }
+.popup-weekdays.hidden { display: none; }
+.popup-weekday {
+  flex: 1;
+  min-width: 40px;
+  padding: var(--mdc-shape-small, 10px);
+  border: 2px solid var(--_divider);
+  border-radius: var(--_radius-medium);
+  background: var(--_secondary-bg);
+  color: var(--_text-secondary);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+.popup-weekday.active {
+  background: var(--_accent);
+  border-color: var(--_accent);
+  color: var(--_text-on-accent);
+}
+@media (max-width: 480px) {
+  .popup-weekday { min-width: 35px; padding: 8px; font-size: 12px; }
+}
+.duration-selector-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--mdc-layout-grid-gutter, 12px);
+  width: 100%;
+}
+.duration-slider {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--_divider);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.duration-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--_accent);
+  cursor: pointer;
+  border: 2px solid var(--_bg);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s;
+}
+.duration-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+}
+.duration-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--_accent);
+  cursor: pointer;
+  border: 2px solid var(--_bg);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s;
+}
+.duration-slider::-moz-range-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+}
+.duration-input {
+  width: 80px;
+  min-width: 80px;
+  text-align: center;
+}
+
+/* ========================================
+   MAIN HEADER
+   ======================================== */
+
+.main-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--ha-card-header-padding, 16px);
+  background: var(--_bg);
+  border-radius: var(--_radius);
+  box-shadow: var(--_shadow);
+  backdrop-filter: var(--ha-card-backdrop-filter, blur(10px));
+}
+
+.main-header:not(:last-child) {
+  margin-bottom: var(--mdc-layout-grid-gutter, 12px);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.header-icon {
+  width: var(--circular-button-size);
+  height: var(--circular-button-size);
+  min-width: var(--circular-button-size);
+  min-height: var(--circular-button-size);
+  border-radius: 50%;
+  background: var(--_accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--_text-on-accent);
+  cursor: pointer;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.header-icon:active {
+  transform: scale(0.95);
+}
+
+.header-icon.disabled {
+  opacity: 0.5;
+  background: var(--_disabled-color);
+}
+
+.header-icon.enabled {
+  background: var(--_accent);
+  opacity: 1;
+}
+
+.header-icon ha-icon {
+  --mdc-icon-size: 28px;
+}
+
+.header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.header-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--primary-text-color, #212121);
+  line-height: 22px;
+}
+
+.header-status {
+  font-size: 14px;
+  color: var(--secondary-text-color, #757575);
+  line-height: 20px;
+}
+
+.add-button {
+  width: var(--circular-button-size);
+  height: var(--circular-button-size);
+  min-width: var(--circular-button-size);
+  min-height: var(--circular-button-size);
+  border-radius: 50%;
+  background: var(--primary-color, #03a9f4);
+  border: none;
+  color: var(--text-primary-on-background, #ffffff);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.add-button:active {
+  transform: scale(0.95);
+}
+
+.add-button ha-icon {
+  --mdc-icon-size: 28px;
+}
+
+/* ========================================
+   ADD SLOT BUTTON
+   ======================================== */
+
+/* Button outline style moved to shared/assets/homie-css.css */
+
+/* ========================================
+   SLOTS CONTAINER
+   ======================================== */
+
+.slots-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mdc-layout-grid-gutter, 12px);
+}
+
+.slots-container--empty {
+  display: none;
+}
+
+/* ========================================
+   SLOT CARD (Blue Card Design)
+   ======================================== */
+
+.slot-card {
+  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));
+  border-radius: var(--ha-card-border-radius, var(--mdc-shape-medium, 8px));
+  padding: var(--ha-card-header-padding, 16px) var(--ha-card-header-padding, 16px) 0 var(--ha-card-header-padding, 16px);
+  color: var(--primary-text-color, #212121);
+  position: relative;
+  box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));
+  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+  backdrop-filter: var(--ha-card-backdrop-filter, blur(10px));
+}
+
+/* Active slot (enabled) - same background as header */
+.slot-card:not(.disabled) {
+  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));
+}
+
+.slot-card.disabled {
+  opacity: 0.6;
+  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.5)));
+}
+
+.slot-header {
+  display: flex;
+  align-items: center;
+  gap: var(--mdc-layout-grid-gutter, 12px);
+  margin-bottom: 0;
+}
+
+.slot-icon {
+  width: var(--circular-button-size);
+  height: var(--circular-button-size);
+  min-width: var(--circular-button-size);
+  min-height: var(--circular-button-size);
+  border-radius: 50%;
+  background: var(--primary-color, #03a9f4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  color: var(--text-primary-on-background, #ffffff);
+}
+
+.slot-icon:active {
+  transform: scale(0.95);
+}
+
+.slot-icon.enabled {
+  background: var(--primary-color, #03a9f4);
+  opacity: 1;
+}
+
+.slot-icon.disabled {
+  background: var(--disabled-color, var(--disabled-text-color, #9e9e9e));
+  opacity: 0.6;
+}
+
+.slot-icon ha-icon {
+  --mdc-icon-size: 24px;
+}
+
+.slot-info {
+  flex: 1;
+}
+
+.slot-name {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.slot-status {
+  font-size: 14px;
+  color: var(--secondary-text-color, #757575);
+}
+
+.slot-expand {
+  width: 100%;
+  padding: 8px 0;
+  margin-top: var(--mdc-layout-grid-gutter, 12px);
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+  color: var(--primary-text-color, #212121);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.slot-expand ha-icon {
+  --mdc-icon-size: 20px;
+  transition: transform 0.2s;
+}
+
+.slot-card.expanded .slot-expand ha-icon {
+  transform: rotate(180deg);
+}
+
+/* Slot expandable, slot-details styles moved to shared/assets/homie-css.css */
+
+.slot-title {
+  display: flex;
+  align-items: center;
+  gap: var(--mdc-layout-grid-gutter, 6px);
+  font-size: 14px;
+  width: 100%;
+  flex-basis: 100%;
+  margin-bottom: var(--mdc-layout-grid-gutter, 8px);
+}
+
+.slot-time,
+.slot-duration {
+  display: flex;
+  align-items: center;
+  gap: var(--mdc-layout-grid-gutter, 6px);
+  font-size: 14px;
+}
+
+.slot-title ha-icon,
+.slot-time ha-icon,
+.slot-duration ha-icon {
+  --mdc-icon-size: 22px;
+  opacity: 0.9;
+}
+
+.slot-title .slot-title-input {
+  flex: 1;
+}
+
+/* Time picker styles are now in shared/homie-select/homie-select.css */
+
+.slot-time .time-picker-separator {
+  color: var(--primary-text-color, #212121);
+}
+
+/* Select styles are now in shared/homie-select.css */
+
+.slot-weekdays-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--mdc-layout-grid-gutter, 6px);
+}
+
+.slot-weekdays-icon {
+  --mdc-icon-size: 22px;
+  opacity: 0.9;
+  flex-shrink: 0;
+}
+
+.slot-weekdays {
+  display: flex;
+  gap: var(--mdc-layout-grid-gutter, 6px);
+  flex-wrap: wrap;
+  flex: 1;
+  justify-content: flex-start;
+}
+
+.slot-weekday {
+  padding: var(--mdc-shape-small, 6px) var(--mdc-shape-small, 8px);
+  border-radius: var(--ha-card-border-radius, var(--mdc-shape-small, 4px));
+  background: var(--secondary-background-color, #f5f5f5);
+  border: 2px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+  color: var(--primary-text-color, #212121);
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+  flex-shrink: 0;
+  min-width: fit-content;
+  flex: 1;
+  text-align: center;
+  min-width: 0;
+}
+
+.slot-weekday.active {
+  background: var(--primary-color, #03a9f4);
+  color: var(--text-primary-on-background, #ffffff);
+  font-weight: 600;
+  border-color: var(--primary-color, #03a9f4);
+}
+
+/* Slot delete, empty state styles moved to shared/assets/homie-css.css */
+
+/* Popup overlay, popup-header, popup-body, popup-field styles moved to shared/assets/homie-css.css */
+
+/* Popup content (defaults, override via --homie-slots-popup-*) */
+.popup-content {
+  background: var(--_popup-bg);
+  color: var(--_popup-color);
+  -webkit-backdrop-filter: var(--_popup-backdrop-filter);
+  backdrop-filter: var(--_popup-backdrop-filter);
+  box-shadow: var(--_popup-box-shadow);
+  border-radius: var(--_popup-border-radius);
+  width: var(--_popup-width);
+  max-width: var(--_popup-max-width);
+  min-width: var(--_popup-min-width);
+  max-height: var(--_popup-max-height);
+  overflow-y: auto;
+  animation: slideUp 0.3s;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+
+/* Slot time selects */
+.slot-time .time-selects {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+}
+
+.slot-time .time-separator {
+  font-size: 14px;
+  color: var(--primary-text-color, #212121);
+}
+
+/* Popup select styles are now in shared/homie-select.css */
+
+/* Time selects, weekday selector, popup footer/button styles moved to shared/assets/homie-css.css */
+
+/* ========================================
+   RESPONSIVE
+   ======================================== */
+
+@media (max-width: 480px) {
+  .main-header {
+    padding: var(--mdc-shape-small, 12px);
+  }
+  
+  .header-title {
+    font-size: 16px;
+  }
+  
+  .slot-card {
+    padding: var(--mdc-shape-small, 12px);
+  }
+  
+  :host {
+    --_popup-width: var(--mdc-dialog-width, 95%);
+    --_popup-max-height: var(--mdc-dialog-max-height, 85vh);
+  }
+}
+
+/* ========================================
+   DARK THEME SUPPORT
+   ======================================== */
+
+/* Dark theme adjustments are handled by HA CSS variables */
+/* No additional dark theme styles needed */

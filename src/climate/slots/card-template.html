@@ -1,0 +1,232 @@
+  <!-- Main Header -->
+  <div class="main-header">
+    <div class="header-left">
+      <div class="header-icon {{ENABLED_CLASS}}" data-action="toggle-enabled" title="Toggle scheduler">
+        <ha-icon icon="mdi:calendar-clock"></ha-icon>
+        <!-- <ha-icon icon="{{ICON}}"></ha-icon> -->
+      </div>
+      <div class="header-text">
+        <div class="header-title">
+          {{TITLE}}
+        </div>
+        <div class="header-status">{{STATUS_TEXT}}</div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Slots List (hidden when 0 slots) -->
+  <div class="slots-container{{SLOTS_CONTAINER_CLASS}}">
+    {{ITEMS_CONTENT}}
+  </div>
+  
+  <!-- Add Slot Button -->
+  <button class="button-outline" data-action="open-add-popup">
+    Add Schedule Slot
+  </button>
+  
+  <!-- Add Slot Popup -->
+  <div class="popup-overlay" id="add-popup" style="display: none;">
+    <div class="popup-content">
+      <div class="popup-header">
+        <ha-icon icon="mdi:power"></ha-icon>
+        <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
+          <span class="popup-title">Add Schedule Slot</span>
+          <div style="font-size: 12px; color: var(--secondary-text-color, #757575);">
+            for {{ENTITY_NAME}}
+          </div>
+        </div>
+        <button class="popup-close" data-action="close-popup">
+          <ha-icon icon="mdi:close"></ha-icon>
+        </button>
+      </div>
+      
+      <div class="popup-body">
+        <!-- Title Input -->
+        <div class="popup-field">
+          <label>
+            <ha-icon icon="mdi:label-outline"></ha-icon>
+            <span>Title (optional)</span>
+          </label>
+          <input type="text" class="homie-input" id="popup-title" placeholder="e.g. Morning heating">
+        </div>
+        
+        <!-- Time Input -->
+        <div class="popup-field">
+          <label>
+            <ha-icon icon="mdi:clock-outline"></ha-icon>
+            <span>Start Time</span>
+          </label>
+          <div class="time-selects">
+            <select class="homie-select popup-time-hours" id="popup-time-hours">
+              <option value="00">00</option>
+              <option value="01">01</option>
+              <option value="02">02</option>
+              <option value="03">03</option>
+              <option value="04">04</option>
+              <option value="05">05</option>
+              <option value="06">06</option>
+              <option value="07">07</option>
+              <option value="08" selected>08</option>
+              <option value="09">09</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+              <option value="12">12</option>
+              <option value="13">13</option>
+              <option value="14">14</option>
+              <option value="15">15</option>
+              <option value="16">16</option>
+              <option value="17">17</option>
+              <option value="18">18</option>
+              <option value="19">19</option>
+              <option value="20">20</option>
+              <option value="21">21</option>
+              <option value="22">22</option>
+              <option value="23">23</option>
+            </select>
+            <span class="time-separator">:</span>
+            <select class="homie-select popup-time-minutes" id="popup-time-minutes">
+              <option value="00" selected>00</option>
+              <option value="05">05</option>
+              <option value="10">10</option>
+              <option value="15">15</option>
+              <option value="20">20</option>
+              <option value="25">25</option>
+              <option value="30">30</option>
+              <option value="35">35</option>
+              <option value="40">40</option>
+              <option value="45">45</option>
+              <option value="50">50</option>
+              <option value="55">55</option>
+            </select>
+          </div>
+        </div>
+        
+        <!-- HVAC Mode Select -->
+        <div class="popup-field">
+          <label>
+            <ha-icon icon="mdi:thermostat"></ha-icon>
+            <span>HVAC Mode</span>
+          </label>
+          <select class="homie-select" id="popup-hvac-mode">
+            {{HVAC_MODES_OPTIONS}}
+          </select>
+        </div>
+        
+        <!-- Duration Selector -->
+        <div class="popup-field">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <ha-icon icon="mdi:timer-outline"></ha-icon>
+            <span>Duration (minutes)</span>
+            <input type="checkbox" id="popup-duration-enabled" style="width: 18px; height: 18px; cursor: pointer;">
+          </label>
+          <div id="popup-duration-wrapper" style="display: none; margin-top: 8px;">
+            <!-- SHARED:duration-selector -->
+            <!-- END:duration-selector -->
+          </div>
+        </div>
+        
+        <!-- Weekday Selector -->
+        <div class="popup-field">
+          <label>
+            <ha-icon icon="mdi:calendar"></ha-icon>
+            <span>Days of Week</span>
+          </label>
+          <!-- SHARED:weekday-selector -->
+          <!-- END:weekday-selector -->
+        </div>
+      </div>
+      
+      <div class="popup-footer">
+        <button class="popup-button cancel" data-action="close-popup">Cancel</button>
+        <button class="popup-button save" data-action="save-slot">Save</button>
+      </div>
+    </div>
+  </div>
+
+<!-- Slot Item Template -->
+<template id="slot-item-template">
+  <div class="slot-card {{DISABLED_CLASS}}" data-item-id="{{ITEM_ID}}">
+    <div class="slot-header">
+      <div class="slot-icon {{ICON_CLASS}}" data-action="toggle-item" title="Toggle slot">
+        <ha-icon icon="mdi:power"></ha-icon>
+      </div>
+      <div class="slot-info">
+        <div class="slot-name">{{SLOT_NAME}}</div>
+        <div class="slot-status">{{SLOT_STATUS}}</div>
+      </div>
+    </div>
+    <button class="slot-expand" data-action="toggle-expand" title="Expand/collapse details">
+      <ha-icon icon="mdi:chevron-down"></ha-icon>
+    </button>
+    
+    <div class="slot-expandable">
+      <div class="slot-details">
+        <div class="slot-time">
+          <ha-icon icon="mdi:clock-outline"></ha-icon>
+          <div class="time-selects">
+            <select class="homie-select slot-time-hours" data-action="update-time-hours" data-item-id="{{ITEM_ID}}">
+              <option value="00" {{TIME_HOURS_00}}>00</option>
+              <option value="01" {{TIME_HOURS_01}}>01</option>
+              <option value="02" {{TIME_HOURS_02}}>02</option>
+              <option value="03" {{TIME_HOURS_03}}>03</option>
+              <option value="04" {{TIME_HOURS_04}}>04</option>
+              <option value="05" {{TIME_HOURS_05}}>05</option>
+              <option value="06" {{TIME_HOURS_06}}>06</option>
+              <option value="07" {{TIME_HOURS_07}}>07</option>
+              <option value="08" {{TIME_HOURS_08}}>08</option>
+              <option value="09" {{TIME_HOURS_09}}>09</option>
+              <option value="10" {{TIME_HOURS_10}}>10</option>
+              <option value="11" {{TIME_HOURS_11}}>11</option>
+              <option value="12" {{TIME_HOURS_12}}>12</option>
+              <option value="13" {{TIME_HOURS_13}}>13</option>
+              <option value="14" {{TIME_HOURS_14}}>14</option>
+              <option value="15" {{TIME_HOURS_15}}>15</option>
+              <option value="16" {{TIME_HOURS_16}}>16</option>
+              <option value="17" {{TIME_HOURS_17}}>17</option>
+              <option value="18" {{TIME_HOURS_18}}>18</option>
+              <option value="19" {{TIME_HOURS_19}}>19</option>
+              <option value="20" {{TIME_HOURS_20}}>20</option>
+              <option value="21" {{TIME_HOURS_21}}>21</option>
+              <option value="22" {{TIME_HOURS_22}}>22</option>
+              <option value="23" {{TIME_HOURS_23}}>23</option>
+            </select>
+            <span class="time-separator">:</span>
+            <select class="homie-select slot-time-minutes" data-action="update-time-minutes" data-item-id="{{ITEM_ID}}">
+              <option value="00" {{TIME_MINUTES_00}}>00</option>
+              <option value="05" {{TIME_MINUTES_05}}>05</option>
+              <option value="10" {{TIME_MINUTES_10}}>10</option>
+              <option value="15" {{TIME_MINUTES_15}}>15</option>
+              <option value="20" {{TIME_MINUTES_20}}>20</option>
+              <option value="25" {{TIME_MINUTES_25}}>25</option>
+              <option value="30" {{TIME_MINUTES_30}}>30</option>
+              <option value="35" {{TIME_MINUTES_35}}>35</option>
+              <option value="40" {{TIME_MINUTES_40}}>40</option>
+              <option value="45" {{TIME_MINUTES_45}}>45</option>
+              <option value="50" {{TIME_MINUTES_50}}>50</option>
+              <option value="55" {{TIME_MINUTES_55}}>55</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="slot-duration">
+        <ha-icon icon="mdi:timer-outline"></ha-icon>
+        <!-- SHARED:duration-selector -->
+        <!-- END:duration-selector -->
+      </div>
+      <div class="slot-hvac-mode">
+        <ha-icon icon="mdi:thermostat"></ha-icon>
+        <select class="homie-select" data-action="update-hvac-mode" data-item-id="{{ITEM_ID}}">
+          {{HVAC_MODE_OPTIONS}}
+        </select>
+      </div>
+      
+      <!-- SHARED:weekday-selector -->
+      <!-- END:weekday-selector -->
+      
+      <button class="slot-delete" data-action="delete-item">
+        <ha-icon icon="mdi:delete"></ha-icon>
+        <span>Remove {{SLOT_NAME}}</span>
+      </button>
+    </div>
+  </div>
+</template>
