@@ -23,6 +23,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     this._expandedSlots = new Set(); // Track expanded slots
     this._configError = null; // Store config error message
     this._unsubStateChanged = null; // Unsubscribe function for state_changed events
+    this._optimisticBridgeState = null; // Local overlay for optimistic updates (avoids mutating hass.states)
   }
 
   async _loadTemplate() {
@@ -216,15 +217,39 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           // subscribeEvents returns a Promise that resolves to an unsubscribe function
           this._hass.connection.subscribeEvents(
             (event) => {
-              if (event && event.data && event.data.entity_id === this._bridgeSensor) {
-                // Bridge sensor state changed - update hass and trigger sync
-                const newState = event.data.new_state;
-                if (newState && this._hass) {
-                  // Update hass state with new state from event
-                  this._hass.states[this._bridgeSensor] = newState;
-                  // Trigger hass update to sync this card
-                  // This will trigger the setter which will detect changes and update UI
+              const entityId = event?.data?.entity_id;
+              if (!entityId || entityId !== this._bridgeSensor) return;
+
+              if (event.data && this._hass) {
+                this._hass.callService('homeassistant', 'update_entity', {
+                  entity_id: this._bridgeSensor
+                }).catch(() => {});
+                const hadTemp = this._optimisticBridgeState?.attributes?.items?.some(i => i?.id?.startsWith?.('temp-'));
+                if (hadTemp) {
+                  let attempts = 0;
+                  const pollClear = () => {
+                    if (!this._optimisticBridgeState?.attributes?.items?.some(i => i?.id?.startsWith?.('temp-'))) return;
+                    const fromHass = this._hass?.states?.[this._bridgeSensor]?.attributes?.items || [];
+                    const entityId = this._config?.entity;
+                    const tempItems = (this._optimisticBridgeState?.attributes?.items || []).filter(i => i?.id?.startsWith?.('temp-'));
+                    const realHasSame = tempItems.some(t => fromHass.some(h =>
+              h?.entity_id === entityId && h?.time === t?.time &&
+              JSON.stringify(h?.weekdays || []) === JSON.stringify(t?.weekdays || []) &&
+              !String(h?.id || '').startsWith('temp-')));
+                    if (realHasSame) {
+                      this._optimisticBridgeState = null;
+                      this.hass = { ...this._hass };
+                      this.render().catch(() => {});
+                    } else if (attempts < 20) {
+                      attempts++;
+                      setTimeout(pollClear, 500);
+                    }
+                  };
+                  setTimeout(pollClear, 400);
+                } else {
+                  this._optimisticBridgeState = null;
                   this.hass = { ...this._hass };
+                  setTimeout(() => this.hass = { ...this._hass }, 150);
                 }
               }
             },
@@ -355,7 +380,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
   _getBridgeState() {
     try {
       if (!this._bridgeSensor || !this._hass) return null;
-      return this._hass.states?.[this._bridgeSensor] || null;
+      return this._optimisticBridgeState ?? this._hass.states?.[this._bridgeSensor] ?? null;
     } catch (err) {
       return null;
     }
@@ -373,11 +398,29 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       
       // Filter items by entity_id from config and exclude temporary slots (created by button)
       const entityId = this._config.entity;
-      return allItems.filter(item => 
+      const filtered = allItems.filter(item => 
         item && 
         item.entity_id === entityId && 
         item.temporary !== true  // Exclude temporary slots created by button (strict check)
       );
+      // Dedupe by (time, weekdays): when both temp and real slot exist, show only one (prefer real)
+      const byKey = new Map();
+      for (const item of filtered) {
+        const key = (item.time || '') + '|' + JSON.stringify(item.weekdays || []);
+        const existing = byKey.get(key);
+        const isTemp = item.id && String(item.id).startsWith('temp-');
+        if (!existing) {
+          byKey.set(key, item);
+        } else {
+          const existingIsTemp = existing.id && String(existing.id).startsWith('temp-');
+          if (isTemp && !existingIsTemp) {
+            // keep existing (real)
+          } else if (!isTemp && existingIsTemp) {
+            byKey.set(key, item);
+          }
+        }
+      }
+      return Array.from(byKey.values());
     } catch (err) {
       return [];
     }
@@ -626,28 +669,24 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     const willDisable = hasEnabledSlots;
     const newEnabledState = !willDisable;
     
-    // Optimistically update local data and UI for immediate feedback
+    // Optimistically update local data and UI (using overlay, no hass mutation)
     if (this._hass && this._bridgeSensor) {
-      const bridgeState = this._hass.states[this._bridgeSensor];
+      const bridgeState = this._getBridgeState();
       if (bridgeState?.attributes?.items) {
         const allItems = [...bridgeState.attributes.items];
         
-        // Update all slots for this entity optimistically
         items.forEach(item => {
           if (item && item.id) {
             const itemIndex = allItems.findIndex(i => i && i.id === item.id);
             if (itemIndex !== -1) {
               const updatedItem = { ...allItems[itemIndex], enabled: newEnabledState };
               allItems[itemIndex] = updatedItem;
-              
-              // Update UI immediately for each slot
               this._updateSlotElement(item.id, updatedItem);
             }
           }
         });
         
-        // Update hass state optimistically
-        this._hass.states[this._bridgeSensor] = {
+        this._optimisticBridgeState = {
           ...bridgeState,
           attributes: {
             ...bridgeState.attributes,
@@ -655,14 +694,9 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           }
         };
         
-        // Update header status immediately
         this._updateHeaderStatus();
-        
-        // Trigger hass update to sync with other cards (optimistic)
         this.hass = { ...this._hass };
-        
-        // ALSO trigger direct update for all other cards with the same entity
-        this._syncAllCardsForEntity();
+        this._syncAllCardsForEntity(null, null, this._optimisticBridgeState);
       }
     }
     
@@ -803,11 +837,62 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         service_start: climateServices.service_start,
         service_end: durationValue ? climateServices.service_end : null,
         bridgeSensor: this._bridgeSensor,
-        onRender: (updatedHass) => {
-          this.hass = updatedHass;
+        onRender: () => {
+          // Use current hass (updated by WebSocket), not stale hass from closure
+          this.hass = { ...this._hass };
           this.render().catch(() => {});
         }
       });
+
+      // Optimistic UI: show new slot immediately, clear when real appears (poll, don't force-clear)
+      const bridgeState = this._getBridgeState();
+      if (bridgeState && bridgeState.attributes) {
+        const currentItems = bridgeState.attributes.items || [];
+        const alreadyHasSlot = currentItems.some(
+          (i) => i && i.entity_id === this._config.entity && i.time === time
+        );
+        if (!alreadyHasSlot) {
+          const newItem = {
+            id: 'temp-' + Date.now(),
+            entity_id: this._config.entity,
+            time,
+            duration: durationValue,
+            weekdays: selectedDays,
+            enabled: true,
+            service_start: climateServices.service_start,
+            service_end: durationValue ? climateServices.service_end : null
+          };
+          if (title) newItem.title = title;
+          const newItems = [...currentItems, newItem];
+          this._optimisticBridgeState = {
+            ...bridgeState,
+            attributes: { ...bridgeState.attributes, items: newItems }
+          };
+          this.hass = { ...this._hass };
+          this._syncAllCardsForEntity(null, null, this._optimisticBridgeState);
+          await this.render();
+          let attempts = 0;
+          const pollClear = () => {
+            if (!this._optimisticBridgeState?.attributes?.items?.some(i => i?.id?.startsWith?.('temp-'))) return;
+            const fromHass = this._hass?.states?.[this._bridgeSensor]?.attributes?.items || [];
+            const entityId = this._config?.entity;
+            const tempItems = (this._optimisticBridgeState?.attributes?.items || []).filter(i => i?.id?.startsWith?.('temp-'));
+            const realHasSame = tempItems.some(t => fromHass.some(h =>
+              h?.entity_id === entityId && h?.time === t?.time &&
+              JSON.stringify(h?.weekdays || []) === JSON.stringify(t?.weekdays || []) &&
+              !String(h?.id || '').startsWith('temp-')));
+            if (realHasSame) {
+              this._optimisticBridgeState = null;
+              this.hass = { ...this._hass };
+              this.render().catch(() => {});
+            } else if (attempts < 20) {
+              attempts++;
+              setTimeout(pollClear, 500);
+            }
+          };
+          setTimeout(pollClear, 500);
+        }
+      }
     } catch (err) {
       alert('Failed to add slot: ' + (err.message || err));
       return;
@@ -909,44 +994,34 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     } catch (err) {}
   }
   
-  _syncAllCardsForEntity(itemId = null, updatedItem = null) {
-    // Sync all cards for the same entity by directly calling their hass setter
+  _syncAllCardsForEntity(itemId = null, updatedItem = null, optimisticBridgeState = null) {
     if (!window._homieScheduleCards || !this._hass || !this._config?.entity) {
       return;
     }
     
     const currentEntity = this._config.entity;
-    const updatedHass = { ...this._hass };
     
-    // Update all other cards with the same entity
     window._homieScheduleCards.forEach(card => {
-      // Skip this card (it's already updated)
       if (card === this) return;
       
-      // Only sync cards with the same entity
       if (card._config?.entity === currentEntity && card._hass) {
-        // Update their hass state with our current state (including updated bridge sensor)
-        card._hass = updatedHass;
+        if (optimisticBridgeState) {
+          card._optimisticBridgeState = optimisticBridgeState;
+        }
         
-        // If updating a specific slot, update that slot element directly
         if (itemId && updatedItem && card._updateSlotElement) {
           card._updateSlotElement(itemId, updatedItem);
           card._updateHeaderStatus();
         } else {
-          // For delete operations or full sync, force complete re-render
-          // This ensures the slot list is fully synchronized
           if (card._syncSlotsFromBridgeSensor) {
             card._syncSlotsFromBridgeSensor();
           }
-          // Also trigger full render to ensure UI is completely updated
           if (card.render) {
-            card.render().catch(err => {
-            });
+            card.render().catch(() => {});
           }
         }
         
-        // Trigger their hass setter to update UI (this will also trigger change detection)
-        card.hass = updatedHass;
+        card.hass = { ...card._hass };
       }
     });
   }
@@ -1032,23 +1107,19 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
   }
 
   async _updateItem(itemId, updates) {
-    // Optimistically update local data for immediate UI feedback
+    // Optimistically update (using overlay, no hass mutation)
     if (this._hass && this._bridgeSensor) {
-      const bridgeState = this._hass.states[this._bridgeSensor];
+      const bridgeState = this._getBridgeState();
       if (bridgeState?.attributes?.items) {
         const items = [...bridgeState.attributes.items];
         const itemIndex = items.findIndex(item => item && item.id === itemId);
         if (itemIndex !== -1) {
-          // Deep merge for nested objects like service_start and service_end
           const currentItem = items[itemIndex];
           const updatedItem = { ...currentItem };
           
-          // Handle service_start update - replace completely if provided
           if (updates.service_start) {
             updatedItem.service_start = updates.service_start;
           }
-          
-          // Handle service_end update - replace completely if provided
           if (updates.service_end !== undefined) {
             if (updates.service_end === null) {
               delete updatedItem.service_end;
@@ -1056,8 +1127,6 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
               updatedItem.service_end = updates.service_end;
             }
           }
-          
-          // Apply other updates normally
           Object.keys(updates).forEach(key => {
             if (key !== 'service_start' && key !== 'service_end') {
               updatedItem[key] = updates[key];
@@ -1066,8 +1135,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           
           items[itemIndex] = updatedItem;
           
-          // Update hass state optimistically
-          this._hass.states[this._bridgeSensor] = {
+          this._optimisticBridgeState = {
             ...bridgeState,
             attributes: {
               ...bridgeState.attributes,
@@ -1075,34 +1143,18 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
             }
           };
           
-          // Update UI immediately (optimistic update) - BEFORE service call
           this._updateSlotElement(itemId, updatedItem);
           this._updateHeaderStatus();
-          
-          // Trigger hass update to sync with other cards (optimistic) - SAME as _toggleEnabled
           this.hass = { ...this._hass };
-          
-          // ALSO trigger direct update for all other cards with the same entity
-          // Pass itemId and updatedItem so other cards can update the specific slot
-          this._syncAllCardsForEntity(itemId, updatedItem);
+          this._syncAllCardsForEntity(itemId, updatedItem, this._optimisticBridgeState);
         }
       }
     }
     
-    // Then update via service (server is source of truth)
-    const serviceData = {
-      id: itemId,
-      ...updates
-    };
+    const serviceData = { id: itemId, ...updates };
     await this._callService('update_item', serviceData);
     
-    // Force update bridge sensor after updating item - request entity update and sync
     if (this._hass && this._bridgeSensor) {
-      // After service call, manually trigger state_changed event simulation
-      // by updating hass.states and then triggering hass update
-      // This ensures other cards get the update immediately
-      
-      // First, try to get fresh state from server
       try {
         await this._hass.callService('homeassistant', 'update_entity', {
           entity_id: this._bridgeSensor
@@ -1110,36 +1162,18 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       } catch (e) {
       }
       
-      // Immediately trigger sync by manually updating hass state
-      // This simulates a state_changed event for other cards
       setTimeout(() => {
-        if (this._hass && this._bridgeSensor) {
-          const bridgeState = this._hass.states[this._bridgeSensor];
-          if (bridgeState) {
-            // Create a new state object to trigger change detection
-            const updatedState = {
-              ...bridgeState,
-              attributes: {
-                ...bridgeState.attributes,
-                items: [...(bridgeState.attributes?.items || [])]
-              }
-            };
-            this._hass.states[this._bridgeSensor] = updatedState;
-            
-            // Trigger hass update to sync with other cards
-            this.hass = { ...this._hass };
-          }
+        if (this._hass) {
+          this._optimisticBridgeState = null;
+          this.hass = { ...this._hass };
         }
       }, 100);
       
-      // Also trigger sync after a longer delay to ensure server state is synced
       setTimeout(() => {
         if (this._hass) {
-          // Force re-render to get fresh state from server
+          this._optimisticBridgeState = null;
           this.hass = { ...this._hass };
-          // Also trigger explicit render to ensure UI updates
-          this.render().catch(err => {
-          });
+          this.render().catch(() => {});
         }
       }, 500);
     }
@@ -1173,12 +1207,9 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           // Trigger full re-render
           setTimeout(() => {
             if (this._hass) {
-              // Update hass state first to get fresh bridge sensor data
+              this._optimisticBridgeState = null;
               this.hass = { ...this._hass };
-              
-              // Also trigger explicit render for this card
-              this.render().catch(err => {
-              });
+              this.render().catch(() => {});
               
               // Sync all other cards with the same entity after state is updated
               // Use a small delay to ensure bridge sensor state is fresh

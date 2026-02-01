@@ -9,9 +9,9 @@
  *   - card-template.html (HTML template, embedded)
  *   - ../../shared/* (JS/HTML only; CSS is in card-styles.css)
  * 
- * To rebuild: bash build.sh (output: www/)
+ * To rebuild: bash build.sh (output: dist/)
  * 
- * Last build: 2026-01-29T09:20:10.911Z
+ * Last build: 2026-02-01T14:42:13.701Z
  */
 
 /**
@@ -754,43 +754,36 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
         try {
           this._hass.connection.subscribeEvents(
             (event) => {
-              if (event && event.data) {
-                const entityId = event.data.entity_id;
-                
-                // Handle bridge sensor updates
-                if (entityId === this._bridgeSensor) {
-                  const newState = event.data.new_state;
-                  if (newState && this._hass) {
-                    this._hass.states[this._bridgeSensor] = newState;
-                    this.hass = { ...this._hass };
+              const entityId = event?.data?.entity_id;
+              const watched = [this._bridgeSensor, this._config?.entity].filter(Boolean);
+              if (!entityId || !watched.includes(entityId)) return;
+
+              if (event.data) {
+                const newState = event.data.new_state;
+                const oldState = event.data.old_state;
+
+                // Handle entity turned off — clear active button marker
+                if (entityId === this._config?.entity && oldState?.state === 'on' && newState?.state === 'off') {
+                  if (this._config.entity && this._entryId) {
+                    setTimeout(async () => {
+                      try {
+                        await this._callService('clear_active_button', {
+                          entity_id: this._config.entity
+                        });
+                      } catch (e) {
+                        // Ignore errors
+                      }
+                    }, 0);
                   }
                 }
-                
-                // Handle entity state changes (boiler on/off)
-                if (entityId === this._config?.entity) {
-                  const newState = event.data.new_state;
-                  const oldState = event.data.old_state;
-                  
-                  // If entity was turned off (manually or otherwise), clear active button marker in integration
-                  if (oldState?.state === 'on' && newState?.state === 'off') {
-                    if (this._config.entity && this._entryId) {
-                      // Use setTimeout to avoid await in non-async callback
-                      setTimeout(async () => {
-                        try {
-                          await this._callService('clear_active_button', {
-                            entity_id: this._config.entity
-                          });
-                        } catch (e) {
-                          // Ignore errors
-                        }
-                      }, 0);
-                    }
-                  }
-                  
-                  // Trigger re-render to update button states
-                  setTimeout(() => {
-                    this.render().catch(() => {});
-                  }, 100);
+
+                // Rely on HA to update hass.states — request refresh and trigger re-render
+                if (this._hass) {
+                  this._hass.callService('homeassistant', 'update_entity', {
+                    entity_id: entityId
+                  }).catch(() => {});
+                  this.hass = { ...this._hass };
+                  setTimeout(() => this.render().catch(() => {}), 100);
                 }
               }
             },
@@ -1068,6 +1061,49 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
     }
   }
 
+  /** Check if entity is currently inside an active schedule slot (overlapping with button run). */
+  _isInsideActiveSlot() {
+    try {
+      const bridgeState = this._getBridgeState();
+      if (!bridgeState) return false;
+      const entityId = this._config?.entity;
+      if (!entityId) return false;
+
+      const items = bridgeState.attributes?.items || [];
+      const now = new Date();
+      const jsDay = now.getDay();
+      const intWeekday = jsDay === 0 ? 6 : jsDay - 1;
+
+      for (const item of items) {
+        if (!item || item.entity_id !== entityId || !item.enabled) continue;
+        const timeStr = item.time;
+        const duration = parseInt(item.duration, 10) || 30;
+        const weekdays = item.weekdays || [];
+        if (!timeStr || !weekdays.length) continue;
+
+        const m = timeStr.match(/^([0-1][0-9]|2[0-3]):([0-5][0-9])$/);
+        if (!m) continue;
+        const hour = parseInt(m[1], 10);
+        const min = parseInt(m[2], 10);
+
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, min, 0, 0);
+        const end = new Date(start.getTime() + duration * 60 * 1000);
+        if (weekdays.includes(intWeekday) && start <= now && now < end) return true;
+
+        const startYesterday = new Date(start);
+        startYesterday.setDate(startYesterday.getDate() - 1);
+        const endYesterday = new Date(startYesterday.getTime() + duration * 60 * 1000);
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayIntWeekday = yesterday.getDay() === 0 ? 6 : yesterday.getDay() - 1;
+        if (weekdays.includes(yesterdayIntWeekday) && startYesterday <= now && now < endYesterday) return true;
+      }
+      return false;
+    } catch (err) {
+      return false;
+    }
+  }
+
   _formatDuration(minutes) {
     if (!minutes || minutes < 1) return { number: '0', unit: 'min' };
     
@@ -1206,6 +1242,9 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
     if (!this._entryId) {
       this._findBridgeSensor();
       if (!this._entryId) {
+        const msg = 'Homie Scheduler: bridge sensor not found. Check integration is installed and sensor "Scheduler Info" exists.';
+        console.warn(msg);
+        if (typeof alert === 'function') alert(msg);
         return Promise.resolve();
       }
     }
@@ -1219,7 +1258,9 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
       const result = await this._hass.callService('homie_scheduler', service, serviceData);
       return result;
     } catch (err) {
-      alert('Failed to run schedule: ' + (err.message || err));
+      const msg = 'Homie Scheduler: ' + (err?.message || String(err));
+      console.error(msg, err);
+      if (typeof alert === 'function') alert(msg);
       throw err;
     }
   }
@@ -1368,6 +1409,21 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
       this._turnOffTimer = setTimeout(async () => {
         try {
           if (this._hass && this._config && this._config.entity) {
+            // If a schedule slot has started and overlaps — let scheduler control turn-off (respects max_runtime)
+            if (this._isInsideActiveSlot()) {
+              if (this._config.entity && this._entryId) {
+                try {
+                  await this._callService('clear_active_button', {
+                    entity_id: this._config.entity
+                  });
+                } catch (e) {
+                  // Ignore errors
+                }
+              }
+              this._turnOffTimer = null;
+              this.render().catch(() => {});
+              return;
+            }
             await this._hass.callService('switch', 'turn_off', {
               entity_id: this._config.entity
             });
@@ -1425,7 +1481,7 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
       
       newButton.addEventListener('click', (e) => {
         e.stopPropagation();
-        // Allow click on disabled buttons to switch between durations
+        if (newButton.classList.contains('disabled')) return;
         this._runSchedule().catch(err => {
         });
       });
@@ -1531,20 +1587,8 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
             targetTime = new Date(Date.now() + (this._config.duration * 60 * 1000));
           }
           
-          // Check if less than 2 hours
-          const now = Date.now();
-          const diffMs = targetTime.getTime() - now;
-          const twoHoursMs = 2 * 60 * 60 * 1000;
-          
-          if (diffMs < twoHoursMs) {
-            // Less than 2 hours - show countdown
-            const timeUntil = this._formatTimeUntil(targetTime);
-            recirculationLabelBottom = `will be off in ${timeUntil}`;
-          } else {
-            // 2 hours or more - show time
-            const timeStr = this._formatDateTime(targetTime);
-            recirculationLabelBottom = `will be off ${timeStr}`;
-          }
+          const timeUntil = this._formatTimeUntil(targetTime);
+          recirculationLabelBottom = `will be off in ${timeUntil}`;
         } else if (isEntityOn && !isThisButtonActive) {
           // Entity is on, but not from this button (manual or other source)
           recirculationLabelTop = 'Already running';
@@ -1583,7 +1627,7 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
         );
       }
       
-      const styleContent = `/**\n * Boiler Schedule Button Card - Simplified Styles\n * \n * Simple HA-style button\n */\n\n:host {\n  display: block;\n  margin: 0 !important;\n  \n  /* Button design tokens - паттерн как в Mushroom cards */\n  /* Кнопка = карточка, поэтому использует фон и тени карточки */\n  --_bg: var(--ha-card-background, var(--card-background-color, #1c1c1c));\n  --_radius: var(--ha-card-border-radius, 12px);\n  --_shadow: var(--ha-card-box-shadow, none);\n  --_backdrop-filter: var(--ha-card-backdrop-filter, none);\n  --_border-color: var(--divider-color, rgba(255, 255, 255, 0.12));\n  \n  --_text: var(--primary-text-color, #fff);\n  --_text-secondary: var(--secondary-text-color, rgba(255,255,255,0.7));\n  \n  --_accent: var(--homie-button-accent, var(--primary-color, #03a9f4));\n  --_disabled-opacity: 0.5;\n  \n  /* Inactive = обычный фон карточки, Active = акцентный цвет */\n  /* С возможностью переопределения через --homie-button-* переменные */\n  --_button-bg-inactive: var(--homie-button-bg-inactive, var(--_bg));\n  --_button-bg-active: var(--homie-button-bg-active, var(--_accent));\n  --_button-bg-disabled: var(--homie-button-bg-disabled, var(--_bg));\n  \n  /* Текст на inactive кнопке = акцентный цвет (primary-color, обычно синий) */\n  --_button-text-inactive: var(--homie-button-text-inactive, var(--primary-color, #03a9f4));\n  --_button-text-active: var(--homie-button-text-active, var(--text-primary-color, #fff));\n  --_button-text-disabled: var(--homie-button-text-disabled, var(--disabled-text-color, rgba(255,255,255,0.5)));\n  \n  --_button-radius: var(--homie-button-radius, var(--_radius));\n  --_button-shadow: var(--homie-button-shadow, var(--_shadow));\n  --_button-shadow-active: var(--homie-button-shadow-active, var(--_shadow));\n  --_button-backdrop-filter: var(--homie-button-backdrop-filter, var(--_backdrop-filter));\n  --_button-border-color: var(--homie-button-border-color, var(--_border-color));\n}\n\n.schedule-button {\n  width: 100%;\n  height: 100%;\n  padding: 12px 16px;\n  border-radius: var(--_button-radius);\n  background: var(--_button-bg-inactive);\n  border: 1px solid var(--_button-border-color);\n  color: var(--_button-text-inactive);\n  box-shadow: var(--_button-shadow);\n  -webkit-backdrop-filter: var(--_button-backdrop-filter);\n  backdrop-filter: var(--_button-backdrop-filter);\n  cursor: pointer;\n  font-size: 14px;\n  font-weight: 500;\n  text-align: center;\n  transition: all 0.2s ease-in-out;\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  gap: 4px;\n}\n\n.hidden {\n  display: none !important;\n}\n\n.button-label {\n  font-size: 12px;\n  font-weight: 400;\n  opacity: 0.9;\n  text-transform: uppercase;\n  letter-spacing: 0.5px;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 8px;\n}\n\n.label-icon {\n  width: 14px;\n  height: 14px;\n  opacity: 0.9;\n  flex-shrink: 0;  /* Prevent icon from shrinking */\n  margin-right: 4px;  /* Additional spacing */\n}\n\n.button-duration {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  line-height: 1.2;\n}\n\n.duration-number {\n  font-size: 40px;\n  font-weight: 600;\n}\n\n.duration-unit {\n  font-size: 18px;\n  font-weight: 600;\n  opacity: 0.9;\n}\n\n.schedule-button:hover:not(.disabled) {\n  opacity: 0.9;\n}\n\n.schedule-button:active:not(.disabled) {\n  opacity: 0.8;\n}\n\n.schedule-button.active {\n  background: var(--_button-bg-active);\n  color: var(--_button-text-active);\n  box-shadow: var(--_button-shadow-active);\n}\n\n.schedule-button.disabled {\n  opacity: 0.5;\n  cursor: not-allowed;\n  background: var(--_button-bg-disabled);\n  color: var(--_button-text-disabled);\n  box-shadow: none;\n}\n\n/* Active button that is also disabled - keep active color but make it non-clickable */\n.schedule-button.active.disabled {\n  background: var(--_button-bg-active);\n  color: var(--_button-text-active);\n  opacity: 1;  /* Keep full opacity for active button */\n  cursor: not-allowed;\n  box-shadow: var(--_button-shadow-active);\n}\n\n/* Recirculation mode styles */\n.schedule-button.recirculation {\n  flex-direction: column;\n  gap: 8px;\n  padding: 16px;\n}\n\n.recirculation-icon {\n  opacity: 1 !important; /* Override parent opacity */\n  color: inherit; /* Inherit text color from button */\n  --mdc-icon-size: 50px;\n  transition: transform 0.3s ease, opacity 0.2s ease;\n  display: block;\n}\n\n\n/* Hover effect for icon - removed for recirculation */\n\n/* Active state for icon */\n.schedule-button.recirculation.active .recirculation-icon {\n  opacity: 1 !important;\n  animation: pulse 2s ease-in-out infinite;\n}\n\n@keyframes pulse {\n  0%, 100% {\n    opacity: 1;\n  }\n  50% {\n    opacity: 0.8;\n  }\n}\n\n.recirculation-label-top,\n.recirculation-label-bottom {\n  font-size: 12px;\n  font-weight: 300; /* Thin text */\n  text-transform: uppercase;\n  letter-spacing: 0.3px;\n  opacity: 0.9;\n  line-height: 1.2;\n}\n\n.recirculation-label-top {\n  margin-bottom: 4px;\n}\n\n.recirculation-label-bottom {\n  margin-top: 4px;\n}\n\n/* ============================================\n * Кастомизация через CSS переменные\n * ============================================\n * \n * Можно переопределить в themes.yaml или через card-mod:\n * \n * homie-scheduler-boiler-button {\n *   --homie-button-bg-inactive: #2c2c2c;\n *   --homie-button-bg-active: #4caf50;\n *   --homie-button-bg-disabled: #1a1a1a;\n *   \n *   --homie-button-text-inactive: #ffffff;\n *   --homie-button-text-active: #ffffff;\n *   --homie-button-text-disabled: rgba(255,255,255,0.3);\n * \n *   --homie-button-backdrop-filter: var(--ha-card-backdrop-filter, none);\n *   --homie-button-border-color: var(--divider-color, rgba(255, 255, 255, 0.12));\n *   \n *   --homie-button-radius: 16px;\n *   --homie-button-shadow: 0 2px 4px rgba(0,0,0,0.1);\n *   --homie-button-shadow-active: 0 4px 12px rgba(76,175,80,0.4);\n * }\n */\n`;
+      const styleContent = `/**\n * Boiler Schedule Button Card - Simplified Styles\n * \n * Simple HA-style button\n */\n\n:host {\n  display: block;\n  margin: 0 !important;\n  \n  /* Button design tokens - паттерн как в Mushroom cards */\n  /* Кнопка = карточка, поэтому использует фон и тени карточки */\n  --_bg: var(--ha-card-background, var(--card-background-color, #1c1c1c));\n  --_radius: var(--ha-card-border-radius, 12px);\n  --_shadow: var(--ha-card-box-shadow, none);\n  --_backdrop-filter: var(--ha-card-backdrop-filter, none);\n  --_border-color: var(--divider-color, rgba(255, 255, 255, 0.12));\n  \n  --_text: var(--primary-text-color, #fff);\n  --_text-secondary: var(--secondary-text-color, rgba(255,255,255,0.7));\n  \n  --_accent: var(--homie-button-accent, var(--primary-color, #03a9f4));\n  --_disabled-opacity: 0.5;\n  \n  /* Inactive = обычный фон карточки, Active = акцентный цвет */\n  /* С возможностью переопределения через --homie-button-* переменные */\n  --_button-bg-inactive: var(--homie-button-bg-inactive, var(--_bg));\n  --_button-bg-active: var(--homie-button-bg-active, var(--_accent));\n  --_button-bg-disabled: var(--homie-button-bg-disabled, var(--_bg));\n  \n  /* Текст на inactive кнопке = акцентный цвет (primary-color, обычно синий) */\n  --_button-text-inactive: var(--homie-button-text-inactive, var(--primary-color, #03a9f4));\n  --_button-text-active: var(--homie-button-text-active, var(--text-primary-color, #fff));\n  --_button-text-disabled: var(--homie-button-text-disabled, var(--disabled-text-color, rgba(255,255,255,0.5)));\n  \n  --_button-radius: var(--homie-button-radius, var(--_radius));\n  --_button-shadow: var(--homie-button-shadow, var(--_shadow));\n  --_button-shadow-active: var(--homie-button-shadow-active, var(--_shadow));\n  --_button-backdrop-filter: var(--homie-button-backdrop-filter, var(--_backdrop-filter));\n  --_button-border-color: var(--homie-button-border-color, var(--_border-color));\n}\n\n.schedule-button {\n  width: 100%;\n  height: 100%;\n  padding: 12px 16px;\n  border-radius: var(--_button-radius);\n  background: var(--_button-bg-inactive);\n  border: 1px solid var(--_button-border-color);\n  color: var(--_button-text-inactive);\n  box-shadow: var(--_button-shadow);\n  -webkit-backdrop-filter: var(--_button-backdrop-filter);\n  backdrop-filter: var(--_button-backdrop-filter);\n  cursor: pointer;\n  font-size: 14px;\n  font-weight: 500;\n  text-align: center;\n  transition: all 0.2s ease-in-out;\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  gap: 4px;\n}\n\n.hidden {\n  display: none !important;\n}\n\n.button-label {\n  font-size: 12px;\n  font-weight: 400;\n  opacity: 0.9;\n  text-transform: uppercase;\n  letter-spacing: 0.5px;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 8px;\n}\n\n.label-icon {\n  width: 14px;\n  height: 14px;\n  opacity: 0.9;\n  flex-shrink: 0;  /* Prevent icon from shrinking */\n  margin-right: 4px;  /* Additional spacing */\n}\n\n.button-duration {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  line-height: 1.2;\n}\n\n.duration-number {\n  font-size: 40px;\n  font-weight: 600;\n}\n\n.duration-unit {\n  font-size: 18px;\n  font-weight: 600;\n  opacity: 0.9;\n}\n\n.schedule-button:hover:not(.disabled) {\n  opacity: 0.9;\n}\n\n.schedule-button:active:not(.disabled) {\n  opacity: 0.8;\n}\n\n.schedule-button.active {\n  background: var(--_button-bg-active);\n  color: var(--_button-text-active);\n  box-shadow: var(--_button-shadow-active);\n}\n\n.schedule-button.disabled {\n  opacity: 0.5;\n  cursor: not-allowed;\n  pointer-events: none;\n  background: var(--_button-bg-disabled);\n  color: var(--_button-text-disabled);\n  box-shadow: none;\n}\n\n/* Active button that is also disabled - keep active color but make it non-clickable */\n.schedule-button.active.disabled {\n  background: var(--_button-bg-active);\n  color: var(--_button-text-active);\n  opacity: 1;  /* Keep full opacity for active button */\n  cursor: not-allowed;\n  pointer-events: none;\n  box-shadow: var(--_button-shadow-active);\n}\n\n/* Recirculation mode styles */\n.schedule-button.recirculation {\n  flex-direction: column;\n  gap: 8px;\n  padding: 16px;\n}\n\n.recirculation-icon {\n  opacity: 1 !important; /* Override parent opacity */\n  color: inherit; /* Inherit text color from button */\n  --mdc-icon-size: 50px;\n  transition: transform 0.3s ease, opacity 0.2s ease;\n  display: block;\n}\n\n\n/* Hover effect for icon - removed for recirculation */\n\n/* Active state for icon */\n.schedule-button.recirculation.active .recirculation-icon {\n  opacity: 1 !important;\n  animation: pulse 2s ease-in-out infinite;\n}\n\n@keyframes pulse {\n  0%, 100% {\n    opacity: 1;\n  }\n  50% {\n    opacity: 0.8;\n  }\n}\n\n.recirculation-label-top,\n.recirculation-label-bottom {\n  font-size: 12px;\n  font-weight: 300; /* Thin text */\n  text-transform: uppercase;\n  letter-spacing: 0.3px;\n  opacity: 0.9;\n  line-height: 1.2;\n}\n\n.recirculation-label-top {\n  margin-bottom: 4px;\n}\n\n.recirculation-label-bottom {\n  margin-top: 4px;\n}\n\n/* ============================================\n * Кастомизация через CSS переменные\n * ============================================\n * \n * Можно переопределить в themes.yaml или через card-mod:\n * \n * homie-scheduler-boiler-button {\n *   --homie-button-bg-inactive: #2c2c2c;\n *   --homie-button-bg-active: #4caf50;\n *   --homie-button-bg-disabled: #1a1a1a;\n *   \n *   --homie-button-text-inactive: #ffffff;\n *   --homie-button-text-active: #ffffff;\n *   --homie-button-text-disabled: rgba(255,255,255,0.3);\n * \n *   --homie-button-backdrop-filter: var(--ha-card-backdrop-filter, none);\n *   --homie-button-border-color: var(--divider-color, rgba(255, 255, 255, 0.12));\n *   \n *   --homie-button-radius: 16px;\n *   --homie-button-shadow: 0 2px 4px rgba(0,0,0,0.1);\n *   --homie-button-shadow-active: 0 4px 12px rgba(76,175,80,0.4);\n * }\n */\n`;
       
       this.shadowRoot.innerHTML = `<style>${styleContent}</style>${html}`;
       

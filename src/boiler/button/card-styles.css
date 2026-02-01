@@ -123,6 +123,7 @@
 .schedule-button.disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  pointer-events: none;
   background: var(--_button-bg-disabled);
   color: var(--_button-text-disabled);
   box-shadow: none;
@@ -134,6 +135,7 @@
   color: var(--_button-text-active);
   opacity: 1;  /* Keep full opacity for active button */
   cursor: not-allowed;
+  pointer-events: none;
   box-shadow: var(--_button-shadow-active);
 }
 

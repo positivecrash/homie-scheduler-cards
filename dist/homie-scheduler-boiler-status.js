@@ -9,9 +9,9 @@
  *   - card-template.html (HTML template, embedded)
  *   - ../../shared/* (JS/HTML only; CSS is in card-styles.css)
  * 
- * To rebuild: bash build.sh (output: www/)
+ * To rebuild: bash build.sh (output: dist/)
  * 
- * Last build: 2026-01-29T09:20:18.019Z
+ * Last build: 2026-02-01T22:38:09.238Z
  */
 
 /**
@@ -717,13 +717,17 @@ class HomieBoilerStatusCard extends HTMLElement {
     this._turnOffTimer = null;  // Timer for scheduled turn-off
     this._updateInterval = null;  // Interval for updating countdown (every minute)
     this._countdownTimeout = null; // Timeout for next countdown update (1s or 60s)
+    this._refreshTimeout = null;   // One-time refresh when bridge may be stale (e.g. after slot start)
+    this._bridgePollTimer = null;  // Poll bridge when entity turns on (bridge updates async)
+    this._bridgePollCount = 0;
+    this._bridgeStateOverride = null;  // Fresh bridge state from state_changed event (hass may be stale)
   }
 
   async _loadTemplate() {
     if (this._htmlTemplate) return this._htmlTemplate;
     
     // Template is embedded in production build
-    this._htmlTemplate = `<div class="status-card">\n  <button class="icon-button {{ICON_BUTTON_CLASS}}" data-action="toggle">\n    <div class="icon-circle">\n      <ha-icon icon="mdi:water-thermometer-outline" class="status-icon"></ha-icon>\n    </div>\n  </button>\n  <div class="content">\n    <div class="title">{{TITLE}}</div>\n    <div class="subtitle">{{SUBTITLE}}</div>\n  </div>\n</div>\n`;
+    this._htmlTemplate = `<div class="status-card">\n  <button class="icon-button {{ICON_BUTTON_CLASS}}" data-action="toggle">\n    <div class="icon-circle">\n      <ha-icon icon="mdi:water-thermometer-outline" class="status-icon"></ha-icon>\n    </div>\n  </button>\n  <div class="content">\n    <div class="title">{{TITLE}}</div>\n    <div class="max-time {{MAX_TIME_HIDDEN_CLASS}}">\n      Max run time: {{MAX_WORKING_TIME}}\n    </div>\n    <div class="subtitle">{{SUBTITLE}}</div>\n  </div>\n</div>\n`;
     return this._htmlTemplate;
   }
 
@@ -742,24 +746,30 @@ class HomieBoilerStatusCard extends HTMLElement {
         try {
           this._hass.connection.subscribeEvents(
             (event) => {
-              if (event && event.data) {
-                const entityId = event.data.entity_id;
-                
-                // Handle bridge sensor updates
-                if (entityId === this._bridgeSensor) {
+              const entityId = event?.data?.entity_id;
+              const watched = [this._bridgeSensor, this._config?.entity].filter(Boolean);
+              if (!entityId || !watched.includes(entityId)) return;
+
+              if (event.data) {
+                if (this._hass) {
+                  // Use new_state from event directly — hass.states may not be updated yet
                   const newState = event.data.new_state;
-                  if (newState && this._hass) {
-                    this._hass.states[this._bridgeSensor] = newState;
-                    this.hass = { ...this._hass };
+                  if (entityId === this._bridgeSensor && newState) {
+                    this._bridgeStateOverride = newState;
                   }
-                }
-                
-                // Handle entity state changes (boiler on/off)
-                if (entityId === this._config?.entity) {
-                  // Trigger re-render to update status
-                  setTimeout(() => {
-                    this.render().catch(() => {});
-                  }, 100);
+                  this._hass.callService('homeassistant', 'update_entity', {
+                    entity_id: entityId
+                  }).catch(() => {});
+                  this.hass = { ...this._hass };
+                  setTimeout(() => this.render().catch(() => {}), 50);
+                  if (entityId === this._config?.entity) {
+                    setTimeout(() => this.render().catch(() => {}), 200);
+                    setTimeout(() => this.render().catch(() => {}), 400);
+                    this._startBridgePoll();
+                  }
+                  if (entityId === this._bridgeSensor) {
+                    this._startBridgePoll();
+                  }
                 }
               }
             },
@@ -790,19 +800,9 @@ class HomieBoilerStatusCard extends HTMLElement {
       throw new Error('Entity is required');
     }
     
-    // Handle auto_off: if not specified, use default 120 minutes; if 0, disable auto-off
-    let autoOff = 120; // Default: 2 hours
-    if (config.auto_off !== undefined && config.auto_off !== null) {
-      autoOff = parseInt(config.auto_off);
-      if (isNaN(autoOff)) {
-        autoOff = 120; // Fallback to default if invalid value
-      }
-    }
-    
     this._config = {
       entity: config.entity,
-      title: config.title || null,
-      auto_off: autoOff
+      title: config.title || null
     };
     
     // If hass is already set, trigger render
@@ -900,11 +900,54 @@ class HomieBoilerStatusCard extends HTMLElement {
     if (!target) return;
     const diffMs = target.getTime() - Date.now();
     if (diffMs <= 0) return;
-    const intervalMs = diffMs < 60 * 1000 ? 1000 : 60000;
+    // Always update every second when showing countdown (we display minutes and seconds)
+    const intervalMs = 1000;
     this._countdownTimeout = setTimeout(() => {
       this._countdownTimeout = null;
       this.render().catch(() => {}).finally(() => this._scheduleCountdownUpdate());
     }, intervalMs);
+  }
+
+  /** Schedule a one-time re-render to pick up fresh bridge state (e.g. after slot start). */
+  _scheduleCountdownRefresh() {
+    if (this._refreshTimeout) return;
+    this._refreshTimeout = setTimeout(() => {
+      this._refreshTimeout = null;
+      this.render().catch(() => {}).finally(() => {
+        if (this._isEntityOn() && this._getTurnOffTime()) this._scheduleCountdownUpdate();
+      });
+    }, 800);
+  }
+
+  /** Poll bridge sensor when entity is on — bridge updates async after slot start. */
+  _startBridgePoll() {
+    if (this._bridgePollTimer) return;
+    this._bridgePollCount = 0;
+    const poll = () => {
+      if (!this._bridgeSensor || !this._hass || !this._isEntityOn()) {
+        this._bridgePollTimer = null;
+        return;
+      }
+      if (this._bridgePollCount >= 10) {
+        this._bridgePollTimer = null;
+        return;
+      }
+      this._bridgePollCount++;
+      this._hass.callService('homeassistant', 'update_entity', {
+        entity_id: this._bridgeSensor
+      }).catch(() => {});
+      this.hass = { ...this._hass };
+      this.render().catch(() => {});
+      this._bridgePollTimer = setTimeout(poll, 2000);
+    };
+    this._bridgePollTimer = setTimeout(poll, 500);
+  }
+
+  _stopBridgePoll() {
+    if (this._bridgePollTimer) {
+      clearTimeout(this._bridgePollTimer);
+      this._bridgePollTimer = null;
+    }
   }
 
   disconnectedCallback() {
@@ -923,6 +966,11 @@ class HomieBoilerStatusCard extends HTMLElement {
       clearTimeout(this._countdownTimeout);
       this._countdownTimeout = null;
     }
+    if (this._refreshTimeout) {
+      clearTimeout(this._refreshTimeout);
+      this._refreshTimeout = null;
+    }
+    this._stopBridgePoll();
     
     if (this._unsubStateChanged) {
       try {
@@ -989,6 +1037,8 @@ class HomieBoilerStatusCard extends HTMLElement {
   _getBridgeState() {
     try {
       if (!this._bridgeSensor || !this._hass) return null;
+      // Prefer fresh state from state_changed event (hass.states may be stale)
+      if (this._bridgeStateOverride) return this._bridgeStateOverride;
       return this._hass.states?.[this._bridgeSensor] || null;
     } catch (err) {
       return null;
@@ -1030,33 +1080,111 @@ class HomieBoilerStatusCard extends HTMLElement {
       const bridgeState = this._getBridgeState();
       if (!bridgeState) return null;
       
+      const entityId = this._config?.entity;
+      if (!entityId) return null;
+      
+      // Priority 1: entity_next_runs — next slot START (when boiler will turn on)
+      // Use this first: entity_next_transitions can be slot END when boiler is off during active slot
+      const entityNextRuns = bridgeState.attributes?.entity_next_runs || {};
+      const entityData = entityNextRuns[entityId];
+      if (entityData && entityData.next_run) {
+        const nextRunDate = new Date(entityData.next_run);
+        if (!isNaN(nextRunDate.getTime()) && nextRunDate > new Date()) return nextRunDate;
+      }
+      
+      // Priority 2: entity_next_transitions (only if earlier than now = next event)
+      const entityNextTransitions = bridgeState.attributes?.entity_next_transitions || {};
+      const nextTransition = entityNextTransitions[entityId];
+      if (nextTransition) {
+        const nextDate = new Date(nextTransition);
+        if (!isNaN(nextDate.getTime()) && nextDate > new Date()) return nextDate;
+      }
+      
+      // Fallback: global next_run (backward compat)
       const nextRun = bridgeState.attributes?.next_run;
       if (!nextRun) return null;
-      
-      // Parse ISO datetime string
       const nextRunDate = new Date(nextRun);
-      if (isNaN(nextRunDate.getTime())) return null;
-      
+      if (isNaN(nextRunDate.getTime()) || nextRunDate <= new Date()) return null;
       return nextRunDate;
     } catch (err) {
       return null;
     }
   }
 
+  /** Collect max_runtime_turn_off_times from ALL bridge sensors (multiple Homie Scheduler instances). */
+  _getAllTurnOffCandidatesFromBridges() {
+    const entityId = this._config?.entity;
+    if (!entityId || !this._hass?.states) return [];
+    const now = new Date();
+    const candidates = [];
+    for (const eid in this._hass.states) {
+      if (!eid.startsWith('sensor.')) continue;
+      const state = this._hass.states[eid];
+      const attrs = state?.attributes || {};
+      if (attrs.integration !== 'homie_scheduler' || !attrs.entry_id) continue;
+      const entityIds = attrs.entity_ids || [];
+      const items = attrs.items || [];
+      const hasEntity = entityIds.includes(entityId) || items.some(i => i?.entity_id === entityId);
+      if (!hasEntity) continue;
+      const maxRuntimeTurnOffTimes = attrs.max_runtime_turn_off_times || {};
+      const val = maxRuntimeTurnOffTimes[entityId];
+      if (val == null || val === '') continue;
+      let turnOffMs = parseInt(val, 10);
+      if (isNaN(turnOffMs)) continue;
+      if (turnOffMs > 0 && turnOffMs < 1e12) turnOffMs *= 1000;
+      const d = new Date(turnOffMs);
+      if (d > now) candidates.push(d.getTime());
+    }
+    return candidates;
+  }
+
   _getTurnOffTime() {
     try {
       const bridgeState = this._getBridgeState();
       if (!bridgeState) return null;
-      
+
+      const entityId = this._config?.entity;
+      if (!entityId) return null;
+
       const activeButtons = bridgeState.attributes?.active_buttons || {};
-      const activeButton = activeButtons[this._config?.entity];
-      
-      if (!activeButton || !activeButton.timer_end) return null;
-      
-      const timerEnd = parseInt(activeButton.timer_end);
-      if (isNaN(timerEnd)) return null;
-      
-      return new Date(timerEnd);
+      const activeButton = activeButtons[entityId];
+
+      // Priority 1: active_buttons (from button card set_active_button)
+      if (activeButton && activeButton.timer_end) {
+        let timerEnd = parseInt(activeButton.timer_end, 10);
+        if (!isNaN(timerEnd)) {
+          if (timerEnd > 0 && timerEnd < 1e12) timerEnd *= 1000; // seconds → ms
+          const d = new Date(timerEnd);
+          if (d > new Date()) return d;
+        }
+      }
+
+      // Collect all valid turn-off times; boiler turns off at the earliest
+      const now = new Date();
+      const candidates = [];
+
+      // max_runtime_turn_off_times from ALL bridge sensors (multiple instances → take min)
+      const bridgeCandidates = this._getAllTurnOffCandidatesFromBridges();
+      candidates.push(...bridgeCandidates);
+
+      // Fallback: entity.last_changed + max_runtime (only when integration hasn't provided turn-off time)
+      const hasTurnOffFromIntegration = candidates.length > 0;
+      if (!hasTurnOffFromIntegration) {
+        const entityMaxRuntime = bridgeState.attributes?.entity_max_runtime || {};
+        const maxMinutes = entityMaxRuntime[entityId];
+        if (maxMinutes != null && Number(maxMinutes) > 0) {
+          const entityState = this._getEntityState();
+          if (entityState && entityState.state === 'on' && entityState.last_changed) {
+            const lastChanged = new Date(entityState.last_changed).getTime();
+            const d = new Date(lastChanged + Number(maxMinutes) * 60 * 1000);
+            if (d > now) candidates.push(d.getTime());
+          }
+        }
+      }
+
+      if (candidates.length > 0) return new Date(Math.min(...candidates));
+
+      return null;
     } catch (err) {
       return null;
     }
@@ -1075,6 +1203,59 @@ class HomieBoilerStatusCard extends HTMLElement {
       return entityItems.length > 0;
     } catch (err) {
       return false;
+    }
+  }
+
+  /** Compute slot end time from active items (uses duration). Fallback when integration hasn't stored turn-off yet. */
+  _getSlotEndFromActiveItems() {
+    try {
+      const bridgeState = this._getBridgeState();
+      if (!bridgeState) return null;
+      const entityId = this._config?.entity;
+      if (!entityId) return null;
+      const entityState = this._getEntityState();
+      if (!entityState || entityState.state !== 'on') return null;
+
+      const items = bridgeState.attributes?.items || [];
+      const now = new Date();
+      let earliestEnd = null;
+
+      for (const item of items) {
+        if (!item || item.entity_id !== entityId || !item.enabled) continue;
+        const timeStr = item.time;
+        const duration = parseInt(item.duration, 10) || 30;
+        const weekdays = item.weekdays || [];
+        if (!timeStr || !weekdays.length) continue;
+
+        const m = timeStr.match(/^([0-1][0-9]|2[0-3]):([0-5][0-9])$/);
+        if (!m) continue;
+        const hour = parseInt(m[1], 10);
+        const min = parseInt(m[2], 10);
+
+        // Integration weekdays: 0=Mon .. 6=Sun. JS getDay: 0=Sun .. 6=Sat => int: 0=Mon..6=Sun
+        const jsDay = now.getDay();
+        const intWeekday = jsDay === 0 ? 6 : jsDay - 1;
+        if (!weekdays.includes(intWeekday)) continue;
+
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, min, 0, 0);
+        const end = new Date(start.getTime() + duration * 60 * 1000);
+        if (start <= now && now < end) {
+          if (!earliestEnd || end < earliestEnd) earliestEnd = end;
+        }
+        // Cross-midnight: slot started yesterday
+        const startYesterday = new Date(start);
+        startYesterday.setDate(startYesterday.getDate() - 1);
+        const endYesterday = new Date(startYesterday.getTime() + duration * 60 * 1000);
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayIntWeekday = yesterday.getDay() === 0 ? 6 : yesterday.getDay() - 1;
+        if (weekdays.includes(yesterdayIntWeekday) && startYesterday <= now && now < endYesterday) {
+          if (!earliestEnd || endYesterday < earliestEnd) earliestEnd = endYesterday;
+        }
+      }
+      return earliestEnd;
+    } catch (err) {
+      return null;
     }
   }
 
@@ -1109,6 +1290,22 @@ class HomieBoilerStatusCard extends HTMLElement {
     }
   }
 
+  _getMaxWorkingTimeText() {
+    try {
+      const bridgeState = this._getBridgeState();
+      if (!bridgeState || !this._config?.entity) return '';
+      const entityMaxRuntime = bridgeState.attributes?.entity_max_runtime || {};
+      const minutes = entityMaxRuntime[this._config.entity];
+      if (minutes == null || Number(minutes) <= 0) return '';
+      const m = parseInt(minutes, 10);
+      if (m < 60) return `${m} min`;
+      if (m === 60) return '1 hour';
+      return `${m / 60} hours`;
+    } catch (err) {
+      return '';
+    }
+  }
+
   _formatTimeUntil(date) {
     if (!date) return '';
     
@@ -1119,21 +1316,15 @@ class HomieBoilerStatusCard extends HTMLElement {
       
       if (diffMs <= 0) return 'now';
       
-      const diffMinutes = Math.floor(diffMs / (60 * 1000));
-      const hours = Math.floor(diffMinutes / 60);
-      const minutes = diffMinutes % 60;
+      const totalSeconds = Math.floor(diffMs / 1000);
+      const minutes = Math.floor(totalSeconds / 60) % 60;
+      const seconds = totalSeconds % 60;
+      const hours = Math.floor(totalSeconds / 3600);
       
-      if (diffMs < 60 * 1000) {
-        const seconds = Math.floor(diffMs / 1000);
-        return `${seconds}s`;
+      if (hours > 0) {
+        return `${hours}h ${minutes}m ${seconds}s`;
       }
-      if (hours === 0) {
-        return `${minutes}m`;
-      } else if (minutes === 0) {
-        return `${hours}h`;
-      } else {
-        return `${hours}h ${minutes}m`;
-      }
+      return `${minutes}m ${seconds}s`;
     } catch (err) {
       return '';
     }
@@ -1151,14 +1342,11 @@ class HomieBoilerStatusCard extends HTMLElement {
         if (nextRun) {
           const now = Date.now();
           const diffMs = nextRun.getTime() - now;
-          const twoHoursMs = 2 * 60 * 60 * 1000;
-          
-          if (diffMs > 0 && diffMs < twoHoursMs) {
-            // Less than 2 hours - show countdown
+          const oneDayMs = 24 * 60 * 60 * 1000;
+          if (diffMs > 0 && diffMs < oneDayMs) {
             const timeUntil = this._formatTimeUntil(nextRun);
             return `Next run in ${timeUntil}`;
           } else {
-            // 2 hours or more - show time
             const timeStr = this._formatDateTime(nextRun);
             return `Next run: ${timeStr}`;
           }
@@ -1168,35 +1356,18 @@ class HomieBoilerStatusCard extends HTMLElement {
       return 'Off';
     }
     
-    // Entity is on
+    // Entity is on (turn-off time from integration: slot duration, button, or max_runtime)
     if (turnOffTime) {
-      const now = Date.now();
-      const diffMs = turnOffTime.getTime() - now;
-      const twoHoursMs = 2 * 60 * 60 * 1000;
-      
-      if (diffMs < twoHoursMs) {
-        // Less than 2 hours - show countdown
-        const timeUntil = this._formatTimeUntil(turnOffTime);
-        return `Runs, will be off in ${timeUntil}`;
-      } else {
-        // 2 hours or more - show time
-        const timeStr = this._formatDateTime(turnOffTime);
-        return `Runs, will be off ${timeStr}`;
+      const timeUntil = this._formatTimeUntil(turnOffTime);
+      // If time is in the past, bridge may not have updated yet — refresh to get new slot end
+      if (timeUntil === 'now') {
+        this._scheduleCountdownRefresh();
+        return 'Runs, updating…';
       }
+      return `Runs, will be off in ${timeUntil}`;
     }
     
-    // Entity is on but no timer_end from integration
-    // If auto_off is enabled (not 0), calculate expected turn-off time
-    if (this._config?.auto_off > 0) {
-      // Try to get when entity was turned on to calculate expected turn-off
-      // For now, we'll show a generic message or calculate based on auto_off
-      // Since we don't track when it was turned on, we'll show a message indicating auto-off is active
-      const expectedTurnOff = new Date(Date.now() + (this._config.auto_off * 60 * 1000));
-      const timeStr = this._formatDateTime(expectedTurnOff);
-      return `Runs, will be off at ${timeStr}`;
-    }
-    
-    // auto_off is 0 or not set (but should be set by default, so this is fallback)
+    // Entity is on but no turn-off time from integration
     return 'Runs, please switch off manually';
   }
 
@@ -1254,78 +1425,10 @@ class HomieBoilerStatusCard extends HTMLElement {
           entity_id: this._config.entity
         });
       } else {
-        // Turning on - set up auto-off timer if enabled
+        // Turning on – just turn on (turn-off is from button card duration or integration max_runtime)
         await this._hass.callService('switch', 'turn_on', {
           entity_id: this._config.entity
         });
-        
-        // Set up auto-off timer if auto_off is configured (and > 0)
-        if (this._config.auto_off > 0) {
-          const durationMinutes = this._config.auto_off;
-          const durationMs = durationMinutes * 60 * 1000;
-          
-          // Clear any existing turn-off timer
-          if (this._turnOffTimer) {
-            clearTimeout(this._turnOffTimer);
-            this._turnOffTimer = null;
-          }
-          
-          // Calculate timer end time
-          const timerStartTime = Date.now();
-          const timerEndTime = timerStartTime + durationMs;
-          
-          // Mark as active in integration (via service) if bridge sensor is available
-          if (this._entryId) {
-            try {
-              // Generate a unique button ID for status card
-              const buttonId = `status_${this._config.entity}_${Date.now()}`;
-              await this._callService('set_active_button', {
-                entity_id: this._config.entity,
-                button_id: buttonId,
-                timer_end: timerEndTime,
-                duration: durationMinutes
-              });
-            } catch (e) {
-              // Ignore errors - timer will still work locally
-            }
-          }
-          
-          // Schedule turn-off after duration
-          this._turnOffTimer = setTimeout(async () => {
-            try {
-              if (this._hass && this._config && this._config.entity) {
-                await this._hass.callService('switch', 'turn_off', {
-                  entity_id: this._config.entity
-                });
-                
-                // Clear active button marker in integration
-                if (this._config.entity && this._entryId) {
-                  try {
-                    await this._callService('clear_active_button', {
-                      entity_id: this._config.entity
-                    });
-                  } catch (e) {
-                    // Ignore errors
-                  }
-                }
-                
-                // Update entity state to reflect turn-off
-                setTimeout(() => {
-                  if (this._hass && this._config && this._config.entity) {
-                    this._hass.callService('homeassistant', 'update_entity', {
-                      entity_id: this._config.entity
-                    }).catch(() => {});
-                    this.hass = { ...this._hass };
-                  }
-                }, 100);
-              }
-            } catch (err) {
-              // Ignore errors
-            } finally {
-              this._turnOffTimer = null;
-            }
-          }, durationMs);
-        }
       }
       
       // Update entity state
@@ -1385,11 +1488,16 @@ class HomieBoilerStatusCard extends HTMLElement {
       const subtitle = this._getSubtitle();
       
       const iconButtonClass = isOn ? 'active' : '';
+      const maxWorkingTime = this._getMaxWorkingTimeText();
+      const maxTimeHiddenClass = maxWorkingTime ? '' : 'max-time-hidden';
+      const maxWorkingTimeDisplay = maxWorkingTime || '—';
       
       const htmlContent = template
         .replace(/\{\{ICON_BUTTON_CLASS\}\}/g, iconButtonClass)
         .replace(/\{\{TITLE\}\}/g, this._escapeHtml(title))
-        .replace(/\{\{SUBTITLE\}\}/g, this._escapeHtml(subtitle));
+        .replace(/\{\{SUBTITLE\}\}/g, this._escapeHtml(subtitle))
+        .replace(/\{\{MAX_TIME_HIDDEN_CLASS\}\}/g, maxTimeHiddenClass)
+        .replace(/\{\{MAX_WORKING_TIME\}\}/g, this._escapeHtml(maxWorkingTimeDisplay));
       
       // Load MDI font only in dev mode
       const isDevMode = window.location.protocol === 'file:' || 
@@ -1398,7 +1506,7 @@ class HomieBoilerStatusCard extends HTMLElement {
       const fontLink = isDevMode ? 
         '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@latest/css/materialdesignicons.min.css">' : '';
       
-      const styleContent = `/**\n * Boiler Status Card - Styles\n * \n * Card showing boiler status with icon in circle\n */\n\n:host {\n  display: block;\n  \n  /* Status card design tokens - с возможностью переопределения */\n  --_accent: var(--homie-status-accent, var(--state-switch-on-color, var(--warning-color, #ffc107)));\n  --_bg: var(--homie-status-bg, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_radius: var(--homie-status-radius, var(--ha-card-border-radius, 4px));\n  --_shadow: var(--homie-status-shadow, var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1)));\n  \n  --_text: var(--homie-status-text, var(--primary-text-color, #212121));\n  --_text-secondary: var(--homie-status-text-secondary, var(--secondary-text-color, #757575));\n  --_text-on-accent: var(--homie-status-text-on-accent, var(--text-primary-on-background, #ffffff));\n  \n  --_disabled-color: var(--homie-status-disabled, var(--disabled-color, var(--disabled-text-color, #9e9e9e)));\n}\n\n.status-card {\n  display: flex;\n  align-items: center;\n  gap: 16px;\n  padding: 16px;\n  border-radius: var(--ha-card-border-radius, 4px);\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  box-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1));\n}\n\n.icon-button {\n  flex-shrink: 0;\n  width: 64px;\n  height: 64px;\n  padding: 0;\n  border: none;\n  background: transparent;\n  cursor: pointer;\n  border-radius: 50%;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: transform 0.2s ease, opacity 0.2s ease;\n}\n\n.icon-button:hover:not(.disabled) {\n  transform: scale(1.05);\n  opacity: 0.9;\n}\n\n.icon-button:active:not(.disabled) {\n  transform: scale(0.95);\n}\n\n.icon-button.disabled {\n  cursor: not-allowed;\n  opacity: 0.5;\n}\n\n.icon-circle {\n  width: 64px;\n  height: 64px;\n  border-radius: 50%;\n  background: var(--disabled-color, var(--disabled-text-color, #9e9e9e));\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: background-color 0.2s ease;\n}\n\n.icon-button.active .icon-circle {\n  background: var(--state-switch-on-color, var(--warning-color, #ffc107));\n}\n\n.status-icon {\n  color: var(--text-primary-on-background, #ffffff);\n  --mdc-icon-size: 32px;\n}\n\n.content {\n  flex: 1;\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n  min-width: 0; /* Allow text truncation */\n}\n\n.title {\n  font-size: 16px;\n  font-weight: 500;\n  color: var(--primary-text-color, #212121);\n  line-height: 1.2;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n\n.subtitle {\n  font-size: 14px;\n  font-weight: 400;\n  color: var(--secondary-text-color, #757575);\n  line-height: 1.2;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n`;
+      const styleContent = `/**\n * Boiler Status Card - Styles\n * \n * Card showing boiler status with icon in circle\n */\n\n:host {\n  display: block;\n  \n  /* Status card design tokens - с возможностью переопределения */\n  --_accent: var(--homie-status-accent, var(--state-switch-on-color, var(--warning-color, #ffc107)));\n  --_bg: var(--homie-status-bg, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_radius: var(--homie-status-radius, var(--ha-card-border-radius, 4px));\n  --_shadow: var(--homie-status-shadow, var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1)));\n  \n  --_text: var(--homie-status-text, var(--primary-text-color, #212121));\n  --_text-secondary: var(--homie-status-text-secondary, var(--secondary-text-color, #757575));\n  --_text-on-accent: var(--homie-status-text-on-accent, var(--text-primary-on-background, #ffffff));\n  \n  --_disabled-color: var(--homie-status-disabled, var(--disabled-color, var(--disabled-text-color, #9e9e9e)));\n}\n\n.status-card {\n  display: flex;\n  align-items: center;\n  gap: 16px;\n  padding: 16px;\n  border-radius: var(--ha-card-border-radius, 4px);\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  box-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1));\n}\n\n.icon-button {\n  flex-shrink: 0;\n  width: 64px;\n  height: 64px;\n  padding: 0;\n  border: none;\n  background: transparent;\n  cursor: pointer;\n  border-radius: 50%;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: transform 0.2s ease, opacity 0.2s ease;\n}\n\n.icon-button:hover:not(.disabled) {\n  transform: scale(1.05);\n  opacity: 0.9;\n}\n\n.icon-button:active:not(.disabled) {\n  transform: scale(0.95);\n}\n\n.icon-button.disabled {\n  cursor: not-allowed;\n  opacity: 0.5;\n}\n\n.icon-circle {\n  width: 64px;\n  height: 64px;\n  border-radius: 50%;\n  background: var(--disabled-color, var(--disabled-text-color, #9e9e9e));\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: background-color 0.2s ease;\n}\n\n.icon-button.active .icon-circle {\n  background: var(--state-switch-on-color, var(--warning-color, #ffc107));\n}\n\n.status-icon {\n  color: var(--text-primary-on-background, #ffffff);\n  --mdc-icon-size: 32px;\n}\n\n.content {\n  flex: 1;\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n  min-width: 0; /* Allow text truncation */\n}\n\n.title {\n  font-size: 16px;\n  font-weight: 500;\n  color: var(--primary-text-color, #212121);\n  line-height: 1.2;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n\n.subtitle {\n  font-size: 14px;\n  font-weight: 400;\n  color: var(--secondary-text-color, #757575);\n  line-height: 1.2;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n\n.max-time {\n  font-size: 12px;\n  line-height: 1;\n  color: var(--secondary-text-color, #757575);\n}\n\n.max-time.max-time-hidden {\n  display: none;\n}\n`;
       
       this.shadowRoot.innerHTML = `${fontLink}<style>${styleContent}</style>${htmlContent}`;
       

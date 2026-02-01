@@ -106,3 +106,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.max-time {
+  font-size: 12px;
+  line-height: 1;
+  color: var(--secondary-text-color, #757575);
+}
+
+.max-time.max-time-hidden {
+  display: none;
+}

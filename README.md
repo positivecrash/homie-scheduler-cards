@@ -36,17 +36,6 @@ homie-scheduler-cards/
 
 Cards read data from the **[Homie Scheduler](https://github.com/positivecrash/homie-scheduler-integration)** integration. You need to [install and configure it](https://github.com/positivecrash/homie-scheduler-integration) first.
 
-**Entities created by the integration:**
-
-1. **sensor.homie_scheduler_scheduler_info** – bridge for cards: `items`, `entity_ids`, `next_run`, `active_buttons`
-2. **switch.homie_scheduler_schedule_enabled** – global scheduler on/off
-3. **sensor.homie_scheduler_status** – status + next run (e.g. "On • Next in 15m")
-4. **sensor.homie_scheduler_next_run** – next transition timestamp
-
-**Services:** `homie_scheduler.set_items`, `add_item`, `update_item`, `delete_item`, `set_enabled`, `toggle_enabled`, `set_active_button`, `clear_active_button`
-
-After adding the integration: **Settings → Devices & Services → Homie Scheduler → Configure** (e.g. boiler max runtime).
-
 ---
 
 ## Cards
@@ -120,45 +109,36 @@ mode: recirculation
 
 ### boiler/status
 
-Status card for boiler/switch entities with icon-based toggle and automatic turn-off:
+Status card for boiler/switch entities with icon-based toggle:
 - Icon in circle (blue when off, yellow when on) – click to toggle switch
 - Configurable title (falls back to entity friendly_name or entity_id)
 - Dynamic subtitle showing status and next run information
-- Optional automatic turn-off timer (default: 2 hours)
 
 **Features:**
 - One-click toggle via icon circle
-- Automatic turn-off timer (configurable, default 120 minutes)
 - Smart subtitle text:
-  - When off + has schedules: "Next run: [time]"
-  - When on + has turn-off time: "Runs, will be off at [time]"
+  - When off + has schedules: "Next run: [time]" or countdown
+  - When on + has turn-off time (from button card or integration max_runtime): "Runs, will be off in [time]"
   - When on + no turn-off time: "Runs, please switch off manually"
 - Title fallback: config.title → entity friendly_name → entity_id
-- Timer persistence via integration (works across browser tabs/devices)
-- Timer restoration on page reload
 
 **Usage:**
 ```yaml
 type: custom:homie-scheduler-boiler-status
 entity: switch.boiler
 title: Boiler  # Optional: custom title (falls back to friendly_name or entity_id)
-auto_off: 120  # Optional: auto-off duration in minutes (default: 120, set to 0 to disable)
 ```
 
 **Configuration:**
 - `entity` (required) – Switch/input_boolean entity to control
 - `title` (optional) – Custom title for the card. If not provided, uses entity's friendly_name, or falls back to entity_id
-- `auto_off` (optional) – Automatic turn-off duration in minutes:
-  - Not specified: defaults to 120 minutes (2 hours)
-  - `0`: disables automatic turn-off
-  - Any positive number: sets custom duration in minutes
 
 **Card States:**
 - **Icon Circle (Off)** – Blue circle with water thermometer icon
 - **Icon Circle (On)** – Yellow circle with water thermometer icon
 - **Subtitle (Off + Schedules)** – "Next run: [time]" when schedules exist
-- **Subtitle (On + Timer)** – "Runs, will be off at [time]" when auto-off timer is active
-- **Subtitle (On + No Timer)** – "Runs, please switch off manually" when manually turned on
+- **Subtitle (On + Timer)** – "Runs, will be off in [time]" when turn-off is set (e.g. by duration button or integration max_runtime)
+- **Subtitle (On + No Timer)** – "Runs, please switch off manually" when turned on via status card
 
 ### climate/slots
 
@@ -349,7 +329,6 @@ mode: recirculation
 type: custom:homie-scheduler-boiler-status
 entity: switch.boiler
 title: Boiler
-auto_off: 120
 ```
 
 ## Requirements
