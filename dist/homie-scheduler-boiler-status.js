@@ -1,6 +1,6 @@
 /**
  * Scheduler Boiler Status Card
- * Last build: 2026-02-02T12:27:59.443Z
+ * Last build: 2026-02-02T14:38:13.013Z
  * Version: 1.0.1
  */
 
@@ -1098,7 +1098,10 @@ class HomieBoilerStatusCard extends HTMLElement {
     const candidates = [];
     for (const eid in this._hass.states) {
       if (!eid.startsWith('sensor.')) continue;
-      const state = this._hass.states[eid];
+      // Use fresh bridge state from state_changed when available (slot start updates bridge async)
+      const state = (eid === this._bridgeSensor && this._bridgeStateOverride)
+        ? this._bridgeStateOverride
+        : this._hass.states[eid];
       const attrs = state?.attributes || {};
       if (attrs.integration !== 'homie_scheduler' || !attrs.entry_id) continue;
       const entityIds = attrs.entity_ids || [];
