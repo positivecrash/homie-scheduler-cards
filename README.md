@@ -1,6 +1,18 @@
 # Homie Scheduler Cards
 
-Lovelace cards for schedule management (boiler, climate). **Requires** the [**Homie Scheduler** integration](https://github.com/positivecrash/homie-scheduler-integration) — install it first.
+Lovelace cards for schedule management (boiler, climate).
+
+## Cards description
+
+- **Boiler slots** – add/edit schedule slots for boiler/switch (time, duration, weekdays)
+- **Boiler button** – one-click run for X minutes or recirculation mode (30 min)
+- **Boiler status** – icon toggle, status text, optional auto turn-off
+- **Climate slots** – schedule slots for climate entities (presets, time, weekdays)
+
+## Requirements
+
+- [**Homie Scheduler** integration](https://github.com/positivecrash/homie-scheduler-integration)
+- Home Assistant 2025.9 or newer
 
 ## Screenshots
 
@@ -13,6 +25,16 @@ Lovelace cards for schedule management (boiler, climate). **Requires** the [**Ho
 | ![Boiler all](docs/images/homie-scheduler-boiler-all-default.png) | ![Settings](docs/images/homie-scheduler-settings.png) |
 
 Screencast: [screencast-boiler-automation.mov](docs/images/screencast-boiler-automation.mov)
+
+
+## Installation
+
+1. Copy all files from `dist/` (the `.js` files and `homie-custom-styles.css`) into your Home Assistant config under `config/www/homie/` (create the `homie` folder if needed).
+2. In HA: **Settings → Dashboards → Resources** → Add one resource: `/local/homie/homie-scheduler-cards.js` as **JavaScript Module** (loader loads all cards from the same folder). Optionally add `/local/homie/homie-custom-styles.css` as **Stylesheet**. Then add cards to the dashboard (e.g. `type: custom:homie-scheduler-boiler-slots`).
+
+
+---
+
 
 ## Project Structure
 
@@ -28,17 +50,13 @@ homie-scheduler-cards/
 │   ├── shared/           # Shared build script and components
 │   └── homie-custom-styles.css  # Template for custom styles
 ├── dist/                  # Build output (loader + all .js + homie-custom-styles.css)
-├── install.sh            # Installation script
+│
 └── README.md
 ```
 
-## Integration (required)
-
-Cards read data from the **[Homie Scheduler](https://github.com/positivecrash/homie-scheduler-integration)** integration. You need to [install and configure it](https://github.com/positivecrash/homie-scheduler-integration) first.
-
 ---
 
-## Cards
+## Cards Usage
 
 ### boiler/slots
 
@@ -65,10 +83,6 @@ duration_step: 15            # Step in minutes (default: 15)
 
 ### boiler/button
 
-Button card for running boiler schedule on demand with two display modes:
-- **Normal mode**: Timer icon with "Run for" label and duration
-- **Recirculation mode**: Large reload icon with "Recirculation" text (fixed 30 minutes)
-
 **Features:**
 - One-click schedule activation
 - Configurable duration (in minutes) for normal mode, fixed 30 minutes for recirculation
@@ -78,12 +92,6 @@ Button card for running boiler schedule on demand with two display modes:
 - State synchronization across multiple buttons for the same entity
 - State persistence via integration (works across browser tabs/devices)
 
-**How it works:**
-- Uses JavaScript `setTimeout` for scheduling automatic turn-off (no schedule slot creation)
-- Button state (active/inactive) is stored in the integration via `homie_scheduler.set_active_button` and `homie_scheduler.clear_active_button` services
-- State is synchronized through the bridge sensor's `active_buttons` attribute
-- Timer is restored from integration state if page is reloaded while boiler is running
-
 **Usage - Normal Mode:**
 ```yaml
 type: custom:homie-scheduler-boiler-button
@@ -92,6 +100,9 @@ duration: 60  # Duration in minutes (default: 60)
 ```
 
 **Usage - Recirculation Mode:**
+
+Works same as normal, but has different appearance.
+
 ```yaml
 type: custom:homie-scheduler-boiler-button
 entity: switch.boiler
@@ -100,17 +111,11 @@ mode: recirculation
 # duration: 45  # Optional: custom duration in minutes
 ```
 
-**Button States:**
-- **Normal** – Blue button with timer icon, "Run for" label and duration (e.g., "1 hour")
-- **Active** – Yellow button when schedule is running, shows duration (disabled, not clickable)
-- **Disabled** – Grayed out and non-clickable when entity is already on (for other buttons of the same entity)
-- **Recirculation (Normal)** – Blue button with large reload icon and "Recirculation" text below
-- **Recirculation (Active)** – Yellow button with large reload icon and "Recirculation" text (disabled, not clickable)
 
 ### boiler/status
 
 Status card for boiler/switch entities with icon-based toggle:
-- Icon in circle (blue when off, yellow when on) – click to toggle switch
+- Icon in circle with on/off states – click to toggle switch
 - Configurable title (falls back to entity friendly_name or entity_id)
 - Dynamic subtitle showing status and next run information
 
@@ -133,12 +138,6 @@ title: Boiler  # Optional: custom title (falls back to friendly_name or entity_i
 - `entity` (required) – Switch/input_boolean entity to control
 - `title` (optional) – Custom title for the card. If not provided, uses entity's friendly_name, or falls back to entity_id
 
-**Card States:**
-- **Icon Circle (Off)** – Blue circle with water thermometer icon
-- **Icon Circle (On)** – Yellow circle with water thermometer icon
-- **Subtitle (Off + Schedules)** – "Next run: [time]" when schedules exist
-- **Subtitle (On + Timer)** – "Runs, will be off in [time]" when turn-off is set (e.g. by duration button or integration max_runtime)
-- **Subtitle (On + No Timer)** – "Runs, please switch off manually" when turned on via status card
 
 ### climate/slots
 
@@ -262,7 +261,7 @@ homie-scheduler-boiler-status {
 
 ---
 
-## Build
+## Build (only for development)
 
 From each card directory:
 
@@ -275,110 +274,6 @@ cd src/climate/slots && bash build.sh
 
 Output goes to `dist/` (and `homie-custom-styles.css` is copied there on each build).
 
-## Installation
-
-### Via HACS (recommended)
-
-1. In HACS go to **Frontend** → **Explore & Download Repositories** → search for **Homie Scheduler Cards** → Download.
-2. **Settings → Dashboards → Resources** → Add resource:
-   - **URL:** the path HACS shows for the plugin (e.g. `/hacsfiles/homie-scheduler-cards/homie-scheduler-cards.js`)
-   - **Type:** JavaScript Module
-3. Optionally add **Stylesheet** with URL to `homie-custom-styles.css` from the same HACS folder (for global CSS variables).
-4. Add cards to the dashboard (e.g. `type: custom:homie-scheduler-boiler-slots`).
-
-Only one resource (the loader) is required; it loads all card modules from the same directory.
-
-### Manual
-
-```bash
-bash install.sh /path/to/homeassistant/config
-```
-
-This copies `dist/*.js` and `dist/homie-custom-styles.css` to `config/www/homie/`.
-
-Then in HA:
-1. **Settings → Dashboards → Resources** → Add one resource: `/local/homie/homie-scheduler-cards.js` as **JavaScript Module** (loader loads all cards from the same folder)
-2. Optionally add `/local/homie/homie-custom-styles.css` as **Stylesheet**
-3. Add cards to the dashboard (e.g. `type: custom:homie-scheduler-boiler-slots`)
-
-### Example dashboard configuration
-
-```yaml
-# Boiler schedule slots
-type: custom:homie-scheduler-boiler-slots
-entity: switch.boiler
-title: Water Heater Schedule
-duration_range: [15, 1440]
-
-# Climate schedule slots
-type: custom:homie-scheduler-climate-slots
-entity: climate.ac
-title: AC Schedule
-
-# Boiler button (normal)
-type: custom:homie-scheduler-boiler-button
-entity: switch.boiler
-duration: 60
-
-# Boiler button (recirculation)
-type: custom:homie-scheduler-boiler-button
-entity: switch.boiler
-mode: recirculation
-
-# Boiler status
-type: custom:homie-scheduler-boiler-status
-entity: switch.boiler
-title: Boiler
-```
-
-## Requirements
-
-- **[Homie Scheduler](https://github.com/positivecrash/homie-scheduler-integration)** integration installed and configured in Home Assistant
-- Home Assistant Core 2025.9 or newer
-
-## Publishing to GitHub (first time)
-
-1. On GitHub create a new **empty** repository (e.g. `homie-scheduler-cards`); do not add README or .gitignore.
-2. In the project folder (if this folder is inside another git repo, use a separate copy or a new clone so this project is the only content):
-
-```bash
-cd /path/to/homie-scheduler-cards
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/homie-scheduler-cards.git
-git push -u origin main
-```
-
-Replace `YOUR_USERNAME` with your GitHub username. If the repo already has git and remote, just push.
-
-## Releasing
-
-Releases are used for versioning and for HACS to offer updates.
-
-1. **Build** so `dist/` is up to date:
-
-```bash
-cd src/boiler/button && bash build.sh
-cd ../slots && bash build.sh
-cd ../status && bash build.sh
-cd ../../climate/slots && bash build.sh
-```
-
-2. **Commit** changes (including `dist/`), then **tag** and **push**:
-
-```bash
-git add .
-git commit -m "Release v1.0.0"
-git tag v1.0.0
-git push origin main
-git push origin v1.0.0
-```
-
-3. On GitHub: **Releases** → **Create a new release** → choose tag `v1.0.0`, set title (e.g. `v1.0.0`) and optional release notes → **Publish release**.
-
-Use [semantic versioning](https://semver.org/) (e.g. `v1.0.1` for fixes, `v1.1.0` for new features).
 
 ## License
 
