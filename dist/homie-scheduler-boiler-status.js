@@ -1,7 +1,7 @@
 /**
  * Scheduler Boiler Status Card
- * Last build: 2026-02-03T12:56:11.472Z
- * Version: 1.0.2
+ * Last build: 2026-02-03T13:23:34.060Z
+ * Version: 1.0.3
  */
 
 // Shared Components (auto-included from shared/)

@@ -1,7 +1,7 @@
 /**
  * Scheduler Boiler Slots Card
- * Last build: 2026-02-03T12:52:42.161Z
- * Version: 1.0.2
+ * Last build: 2026-02-03T13:23:38.359Z
+ * Version: 1.0.3
  */
 
 // Shared Components (auto-included from shared/)

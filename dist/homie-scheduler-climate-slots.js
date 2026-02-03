@@ -1,7 +1,7 @@
 /**
  * Scheduler Climate Slots Card
- * Last build: 2026-02-02T12:28:05.666Z
- * Version: 1.0.1
+ * Last build: 2026-02-03T13:23:46.243Z
+ * Version: 1.0.3
  */
 
 // Shared Components (auto-included from shared/)

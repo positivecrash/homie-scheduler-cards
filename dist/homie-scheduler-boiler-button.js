@@ -1,7 +1,7 @@
 /**
  * Scheduler Boiler Button Card
- * Last build: 2026-02-03T12:36:32.743Z
- * Version: 1.0.2
+ * Last build: 2026-02-03T13:23:36.478Z
+ * Version: 1.0.3
  */
 
 // Shared Components will be auto-included by build script
