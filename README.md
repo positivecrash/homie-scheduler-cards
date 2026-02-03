@@ -30,7 +30,7 @@ Screencast: [screencast-boiler-automation.mov](docs/images/screencast-boiler-aut
 ## Installation
 
 1. Copy all files from `dist/` (the `.js` files and `homie-custom-styles.css`) into your Home Assistant config under `config/www/homie/` (create the `homie` folder if needed).
-2. In HA: **Settings → Dashboards → Resources** → Add one resource: `/local/homie/homie-scheduler-cards.js` as **JavaScript Module** (loader loads all cards from the same folder). Optionally add `/local/homie/homie-custom-styles.css` as **Stylesheet**. Then add cards to the dashboard (e.g. `type: custom:homie-scheduler-boiler-slots`).
+2. In HA: **Settings → Dashboards → Resources** → add each `.js` card file from `/local/homie/` as a **JavaScript Module**. Optionally add `/local/homie/homie-custom-styles.css` as **Stylesheet**. Then add cards to the dashboard (e.g. `type: custom:homie-scheduler-boiler-slots`).
 
 
 ---
