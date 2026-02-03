@@ -42,11 +42,10 @@ class HomieBoilerStatusCard extends HTMLElement {
     </div>
   </button>
   <div class="content">
-    <div class="title">{{TITLE}}</div>
+    <div class="title">{{TITLE}} <span class="entity-status">{{ENTITY_STATUS}}</span></div>
+    <div class="subtitle max-time {{MAX_TIME_HIDDEN_CLASS}}">Max run time: {{MAX_WORKING_TIME}}</div>
+    <div class="subtitle last-run {{LAST_RUN_HIDDEN_CLASS}}">Last run: {{LAST_RUN_TEXT}}</div>
     <div class="subtitle">{{SUBTITLE}}</div>
-  </div>
-  <div class="max-time {{MAX_TIME_HIDDEN_CLASS}}">
-    Max working time: {{MAX_WORKING_TIME}}
   </div>
 </div>
 `;
@@ -631,6 +630,29 @@ class HomieBoilerStatusCard extends HTMLElement {
     }
   }
 
+  /** Last run text for current entity: "14:40 for 4 min". */
+  _getLastRunText() {
+    try {
+      const bridgeState = this._getBridgeState();
+      if (!bridgeState || !this._config?.entity) return '';
+      const entityLastRuns = bridgeState.attributes?.entity_last_runs || {};
+      const last = entityLastRuns[this._config.entity];
+      if (!last || !last.started_at) return '';
+      const startedAt = last.started_at;
+      const durationMin = last.duration_minutes != null ? parseInt(last.duration_minutes, 10) : 0;
+      let timeStr = '';
+      try {
+        const d = new Date(startedAt);
+        if (!isNaN(d.getTime())) timeStr = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      } catch (_) {}
+      if (!timeStr) timeStr = startedAt.slice(11, 16); // HH:MM from ISO
+      const durationStr = durationMin < 60 ? `${durationMin} min` : `${Math.floor(durationMin / 60)}h ${durationMin % 60} min`;
+      return `${timeStr} for ${durationStr}`;
+    } catch (err) {
+      return '';
+    }
+  }
+
   _formatTimeUntil(date) {
     if (!date) return '';
     
@@ -816,13 +838,19 @@ class HomieBoilerStatusCard extends HTMLElement {
       const maxWorkingTime = this._getMaxWorkingTimeText();
       const maxTimeHiddenClass = maxWorkingTime ? '' : 'max-time-hidden';
       const maxWorkingTimeDisplay = maxWorkingTime || '—';
-      
+      const lastRunText = this._getLastRunText();
+      const lastRunHiddenClass = lastRunText ? '' : 'last-run-hidden';
+      const entityStatus = this._isEntityOn() ? 'On' : 'Off';
+
       const htmlContent = template
         .replace(/\{\{ICON_BUTTON_CLASS\}\}/g, iconButtonClass)
         .replace(/\{\{TITLE\}\}/g, this._escapeHtml(title))
+        .replace(/\{\{ENTITY_STATUS\}\}/g, entityStatus)
         .replace(/\{\{SUBTITLE\}\}/g, this._escapeHtml(subtitle))
         .replace(/\{\{MAX_TIME_HIDDEN_CLASS\}\}/g, maxTimeHiddenClass)
-        .replace(/\{\{MAX_WORKING_TIME\}\}/g, this._escapeHtml(maxWorkingTimeDisplay));
+        .replace(/\{\{MAX_WORKING_TIME\}\}/g, this._escapeHtml(maxWorkingTimeDisplay))
+        .replace(/\{\{LAST_RUN_HIDDEN_CLASS\}\}/g, lastRunHiddenClass)
+        .replace(/\{\{LAST_RUN_TEXT\}\}/g, this._escapeHtml(lastRunText));
       
       // Load MDI font only in dev mode
       const isDevMode = window.location.protocol === 'file:' || 

@@ -5,9 +5,12 @@
     </div>
   </button>
   <div class="content">
-    <div class="title">{{TITLE}}</div>
-    <div class="max-time {{MAX_TIME_HIDDEN_CLASS}}">
+    <div class="title">{{TITLE}} <span class="entity-status">{{ENTITY_STATUS}}</span></div>
+    <div class="subtitle max-time {{MAX_TIME_HIDDEN_CLASS}}">
       Max run time: {{MAX_WORKING_TIME}}
+    </div>
+    <div class="subtitle last-run {{LAST_RUN_HIDDEN_CLASS}}">
+      Latest activity: {{LAST_RUN_TEXT}}
     </div>
     <div class="subtitle">{{SUBTITLE}}</div>
   </div>

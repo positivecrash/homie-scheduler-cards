@@ -261,7 +261,7 @@ homie-scheduler-boiler-status {
 
 ---
 
-## Build (only for development)
+## Build (only for developers)
 
 From each card directory:
 

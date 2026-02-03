@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.3]
+
+### Button
+
+- Recirculation: when entity is turned ON from outside (physical button, another toggle), set timer for duration and turn off; fallback in render if `state_changed` was missed
+
+### Slots
+
+- Remove slot without confirmation dialog
+
+### Status
+
+- Show On/Off after title
+
 ## [1.0.2]
 
 ### Status

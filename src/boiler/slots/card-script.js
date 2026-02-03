@@ -1177,7 +1177,6 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
   }
 
   async _deleteItem(itemId) {
-    if (!confirm('Delete this schedule item?')) return;
     await this._callService('delete_item', { id: itemId });
     
     // Force update after deleting item - request entity update and re-render

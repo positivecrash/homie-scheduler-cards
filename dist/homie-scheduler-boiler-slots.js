@@ -1,7 +1,7 @@
 /**
  * Scheduler Boiler Slots Card
- * Last build: 2026-02-02T12:31:36.027Z
- * Version: 1.0.1
+ * Last build: 2026-02-03T12:52:42.161Z
+ * Version: 1.0.2
  */
 
 // Shared Components (auto-included from shared/)
@@ -1820,7 +1820,6 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
   }
 
   async _deleteItem(itemId) {
-    if (!confirm('Delete this schedule item?')) return;
     await this._callService('delete_item', { id: itemId });
     
     // Force update after deleting item - request entity update and re-render

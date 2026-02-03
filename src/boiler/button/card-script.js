@@ -27,6 +27,8 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
     this._buttonId = null;  // Unique ID for this button instance (entity + duration)
     this._updateInterval = null;  // Interval for updating time display
     this._countdownTimeout = null; // Timeout for next countdown update (1s or 60s)
+    this._weJustTurnedOn = false;  // True while we are handling our own turn_on (to ignore in state_changed)
+    this._externalRecirculationTimerSet = false;  // True when we set recirculation timer for current "on" (external or fallback)
   }
 
   async _loadTemplate() {
@@ -83,8 +85,9 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
                 const newState = event.data.new_state;
                 const oldState = event.data.old_state;
 
-                // Handle entity turned off — clear active button marker
+                // Handle entity turned off — clear active button marker and reset external-timer flag
                 if (entityId === this._config?.entity && oldState?.state === 'on' && newState?.state === 'off') {
+                  this._externalRecirculationTimerSet = false;
                   if (this._config.entity && this._entryId) {
                     setTimeout(async () => {
                       try {
@@ -96,6 +99,13 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
                       }
                     }, 0);
                   }
+                }
+
+                // Recirculation only: entity turned ON from outside (e.g. physical button, another toggle) — set timer for duration
+                if (entityId === this._config?.entity && this._config?.mode === 'recirculation' &&
+                    oldState?.state !== 'on' && newState?.state === 'on' && !this._weJustTurnedOn) {
+                  this._externalRecirculationTimerSet = true;
+                  setTimeout(() => this._applyRecirculationTimerFromExternal(), 150);
                 }
 
                 // Rely on HA to update hass.states — request refresh and trigger re-render
@@ -461,6 +471,67 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
     }
   }
 
+  /** Recirculation only: entity was turned ON from outside — set timer for duration (same as if user pressed the button). */
+  async _applyRecirculationTimerFromExternal() {
+    if (this._config?.mode !== 'recirculation' || !this._config?.entity || !this._hass) return;
+    const durationMinutes = parseInt(this._config.duration) || 1;
+    const durationMs = durationMinutes * 60 * 1000;
+    const timerEndTime = Date.now() + durationMs;
+
+    if (this._turnOffTimer) {
+      clearTimeout(this._turnOffTimer);
+      this._turnOffTimer = null;
+    }
+
+    if (this._buttonId && this._entryId) {
+      try {
+        await this._callService('set_active_button', {
+          entity_id: this._config.entity,
+          button_id: this._buttonId,
+          timer_end: timerEndTime,
+          duration: durationMinutes
+        });
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+
+    this._turnOffTimer = setTimeout(async () => {
+      try {
+        if (this._hass && this._config?.entity) {
+          if (this._isInsideActiveSlot()) {
+            if (this._entryId) {
+              try {
+                await this._callService('clear_active_button', { entity_id: this._config.entity });
+              } catch (e) {}
+            }
+            this._turnOffTimer = null;
+            this.render().catch(() => {});
+            return;
+          }
+          await this._hass.callService('switch', 'turn_off', { entity_id: this._config.entity });
+          if (this._entryId) {
+            try {
+              await this._callService('clear_active_button', { entity_id: this._config.entity });
+            } catch (e) {}
+          }
+          setTimeout(() => {
+            if (this._hass && this._config?.entity) {
+              this._hass.callService('homeassistant', 'update_entity', { entity_id: this._config.entity }).catch(() => {});
+              this.hass = { ...this._hass };
+            }
+          }, 100);
+        }
+      } catch (err) {
+      } finally {
+        this._turnOffTimer = null;
+      }
+      this.render().catch(() => {});
+    }, durationMs);
+
+    this.render().catch(() => {});
+  }
+
   _formatDateTime(date) {
     if (!date) return '';
     
@@ -667,6 +738,7 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
 
     try {
       // Step 1: Turn on boiler immediately (for instant response)
+      if (this._config?.mode === 'recirculation') this._weJustTurnedOn = true;
       try {
         await this._hass.callService('switch', 'turn_on', {
           entity_id: this._config.entity
@@ -725,7 +797,10 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
           // Ignore errors
         }
       }
-      
+      if (this._config?.mode === 'recirculation') {
+        setTimeout(() => { this._weJustTurnedOn = false; }, 500);
+      }
+
       // Schedule turn-off after duration
       this._turnOffTimer = setTimeout(async () => {
         try {
@@ -848,6 +923,12 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
         } catch (e) {
           // Ignore errors
         }
+      }
+
+      // Recirculation fallback: entity is ON but we have no timer (e.g. turned on from outside, or we missed state_changed)
+      if (isRecirculation && isEntityOn && !isThisButtonActive && !this._externalRecirculationTimerSet && !this._weJustTurnedOn) {
+        this._externalRecirculationTimerSet = true;
+        setTimeout(() => this._applyRecirculationTimerFromExternal(), 0);
       }
       
       // Build classes for both buttons

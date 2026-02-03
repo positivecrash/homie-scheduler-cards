@@ -98,21 +98,15 @@
 }
 
 .subtitle {
-  font-size: 14px;
-  font-weight: 400;
-  color: var(--secondary-text-color, #757575);
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.max-time {
   font-size: 12px;
   line-height: 1;
   color: var(--secondary-text-color, #757575);
 }
 
 .max-time.max-time-hidden {
+  display: none;
+}
+
+.last-run.last-run-hidden {
   display: none;
 }

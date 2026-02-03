@@ -1,7 +1,7 @@
 /**
  * Scheduler Boiler Status Card
- * Last build: 2026-02-02T14:38:13.013Z
- * Version: 1.0.1
+ * Last build: 2026-02-03T12:56:11.472Z
+ * Version: 1.0.2
  */
 
 // Shared Components (auto-included from shared/)
@@ -706,7 +706,7 @@ class HomieBoilerStatusCard extends HTMLElement {
     if (this._htmlTemplate) return this._htmlTemplate;
     
     // Template is embedded in production build
-    this._htmlTemplate = `<div class="status-card">\n  <button class="icon-button {{ICON_BUTTON_CLASS}}" data-action="toggle">\n    <div class="icon-circle">\n      <ha-icon icon="mdi:water-thermometer-outline" class="status-icon"></ha-icon>\n    </div>\n  </button>\n  <div class="content">\n    <div class="title">{{TITLE}}</div>\n    <div class="max-time {{MAX_TIME_HIDDEN_CLASS}}">\n      Max run time: {{MAX_WORKING_TIME}}\n    </div>\n    <div class="subtitle">{{SUBTITLE}}</div>\n  </div>\n</div>\n`;
+    this._htmlTemplate = `<div class="status-card">\n  <button class="icon-button {{ICON_BUTTON_CLASS}}" data-action="toggle">\n    <div class="icon-circle">\n      <ha-icon icon="mdi:water-thermometer-outline" class="status-icon"></ha-icon>\n    </div>\n  </button>\n  <div class="content">\n    <div class="title">{{TITLE}} <span class="entity-status">{{ENTITY_STATUS}}</span></div>\n    <div class="subtitle max-time {{MAX_TIME_HIDDEN_CLASS}}">\n      Max run time: {{MAX_WORKING_TIME}}\n    </div>\n    <div class="subtitle last-run {{LAST_RUN_HIDDEN_CLASS}}">\n      Latest activity: {{LAST_RUN_TEXT}}\n    </div>\n    <div class="subtitle">{{SUBTITLE}}</div>\n  </div>\n</div>\n`;
     return this._htmlTemplate;
   }
 
@@ -1288,6 +1288,29 @@ class HomieBoilerStatusCard extends HTMLElement {
     }
   }
 
+  /** Last run text for current entity: "14:40 for 4 min". */
+  _getLastRunText() {
+    try {
+      const bridgeState = this._getBridgeState();
+      if (!bridgeState || !this._config?.entity) return '';
+      const entityLastRuns = bridgeState.attributes?.entity_last_runs || {};
+      const last = entityLastRuns[this._config.entity];
+      if (!last || !last.started_at) return '';
+      const startedAt = last.started_at;
+      const durationMin = last.duration_minutes != null ? parseInt(last.duration_minutes, 10) : 0;
+      let timeStr = '';
+      try {
+        const d = new Date(startedAt);
+        if (!isNaN(d.getTime())) timeStr = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      } catch (_) {}
+      if (!timeStr) timeStr = startedAt.slice(11, 16); // HH:MM from ISO
+      const durationStr = durationMin < 60 ? `${durationMin} min` : `${Math.floor(durationMin / 60)}h ${durationMin % 60} min`;
+      return `${timeStr} for ${durationStr}`;
+    } catch (err) {
+      return '';
+    }
+  }
+
   _formatTimeUntil(date) {
     if (!date) return '';
     
@@ -1473,13 +1496,19 @@ class HomieBoilerStatusCard extends HTMLElement {
       const maxWorkingTime = this._getMaxWorkingTimeText();
       const maxTimeHiddenClass = maxWorkingTime ? '' : 'max-time-hidden';
       const maxWorkingTimeDisplay = maxWorkingTime || '—';
-      
+      const lastRunText = this._getLastRunText();
+      const lastRunHiddenClass = lastRunText ? '' : 'last-run-hidden';
+      const entityStatus = this._isEntityOn() ? 'On' : 'Off';
+
       const htmlContent = template
         .replace(/\{\{ICON_BUTTON_CLASS\}\}/g, iconButtonClass)
         .replace(/\{\{TITLE\}\}/g, this._escapeHtml(title))
+        .replace(/\{\{ENTITY_STATUS\}\}/g, entityStatus)
         .replace(/\{\{SUBTITLE\}\}/g, this._escapeHtml(subtitle))
         .replace(/\{\{MAX_TIME_HIDDEN_CLASS\}\}/g, maxTimeHiddenClass)
-        .replace(/\{\{MAX_WORKING_TIME\}\}/g, this._escapeHtml(maxWorkingTimeDisplay));
+        .replace(/\{\{MAX_WORKING_TIME\}\}/g, this._escapeHtml(maxWorkingTimeDisplay))
+        .replace(/\{\{LAST_RUN_HIDDEN_CLASS\}\}/g, lastRunHiddenClass)
+        .replace(/\{\{LAST_RUN_TEXT\}\}/g, this._escapeHtml(lastRunText));
       
       // Load MDI font only in dev mode
       const isDevMode = window.location.protocol === 'file:' || 
@@ -1488,7 +1517,7 @@ class HomieBoilerStatusCard extends HTMLElement {
       const fontLink = isDevMode ? 
         '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@latest/css/materialdesignicons.min.css">' : '';
       
-      const styleContent = `/**\n * Boiler Status Card - Styles\n * \n * Card showing boiler status with icon in circle\n */\n\n:host {\n  display: block;\n  \n  /* Status card design tokens - с возможностью переопределения */\n  --_accent: var(--homie-status-accent, var(--state-switch-on-color, var(--warning-color, #ffc107)));\n  --_bg: var(--homie-status-bg, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_radius: var(--homie-status-radius, var(--ha-card-border-radius, 4px));\n  --_shadow: var(--homie-status-shadow, var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1)));\n  \n  --_text: var(--homie-status-text, var(--primary-text-color, #212121));\n  --_text-secondary: var(--homie-status-text-secondary, var(--secondary-text-color, #757575));\n  --_text-on-accent: var(--homie-status-text-on-accent, var(--text-primary-on-background, #ffffff));\n  \n  --_disabled-color: var(--homie-status-disabled, var(--disabled-color, var(--disabled-text-color, #9e9e9e)));\n}\n\n.status-card {\n  display: flex;\n  align-items: center;\n  gap: 16px;\n  padding: 16px;\n  border-radius: var(--ha-card-border-radius, 4px);\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  box-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1));\n}\n\n.icon-button {\n  flex-shrink: 0;\n  width: 64px;\n  height: 64px;\n  padding: 0;\n  border: none;\n  background: transparent;\n  cursor: pointer;\n  border-radius: 50%;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: transform 0.2s ease, opacity 0.2s ease;\n}\n\n.icon-button:hover:not(.disabled) {\n  transform: scale(1.05);\n  opacity: 0.9;\n}\n\n.icon-button:active:not(.disabled) {\n  transform: scale(0.95);\n}\n\n.icon-button.disabled {\n  cursor: not-allowed;\n  opacity: 0.5;\n}\n\n.icon-circle {\n  width: 64px;\n  height: 64px;\n  border-radius: 50%;\n  background: var(--disabled-color, var(--disabled-text-color, #9e9e9e));\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: background-color 0.2s ease;\n}\n\n.icon-button.active .icon-circle {\n  background: var(--state-switch-on-color, var(--warning-color, #ffc107));\n}\n\n.status-icon {\n  color: var(--text-primary-on-background, #ffffff);\n  --mdc-icon-size: 32px;\n}\n\n.content {\n  flex: 1;\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n  min-width: 0; /* Allow text truncation */\n}\n\n.title {\n  font-size: 16px;\n  font-weight: 500;\n  color: var(--primary-text-color, #212121);\n  line-height: 1.2;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n\n.subtitle {\n  font-size: 14px;\n  font-weight: 400;\n  color: var(--secondary-text-color, #757575);\n  line-height: 1.2;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n\n.max-time {\n  font-size: 12px;\n  line-height: 1;\n  color: var(--secondary-text-color, #757575);\n}\n\n.max-time.max-time-hidden {\n  display: none;\n}\n`;
+      const styleContent = `/**\n * Boiler Status Card - Styles\n * \n * Card showing boiler status with icon in circle\n */\n\n:host {\n  display: block;\n  \n  /* Status card design tokens - с возможностью переопределения */\n  --_accent: var(--homie-status-accent, var(--state-switch-on-color, var(--warning-color, #ffc107)));\n  --_bg: var(--homie-status-bg, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_radius: var(--homie-status-radius, var(--ha-card-border-radius, 4px));\n  --_shadow: var(--homie-status-shadow, var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1)));\n  \n  --_text: var(--homie-status-text, var(--primary-text-color, #212121));\n  --_text-secondary: var(--homie-status-text-secondary, var(--secondary-text-color, #757575));\n  --_text-on-accent: var(--homie-status-text-on-accent, var(--text-primary-on-background, #ffffff));\n  \n  --_disabled-color: var(--homie-status-disabled, var(--disabled-color, var(--disabled-text-color, #9e9e9e)));\n}\n\n.status-card {\n  display: flex;\n  align-items: center;\n  gap: 16px;\n  padding: 16px;\n  border-radius: var(--ha-card-border-radius, 4px);\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  box-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1));\n}\n\n.icon-button {\n  flex-shrink: 0;\n  width: 64px;\n  height: 64px;\n  padding: 0;\n  border: none;\n  background: transparent;\n  cursor: pointer;\n  border-radius: 50%;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: transform 0.2s ease, opacity 0.2s ease;\n}\n\n.icon-button:hover:not(.disabled) {\n  transform: scale(1.05);\n  opacity: 0.9;\n}\n\n.icon-button:active:not(.disabled) {\n  transform: scale(0.95);\n}\n\n.icon-button.disabled {\n  cursor: not-allowed;\n  opacity: 0.5;\n}\n\n.icon-circle {\n  width: 64px;\n  height: 64px;\n  border-radius: 50%;\n  background: var(--disabled-color, var(--disabled-text-color, #9e9e9e));\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: background-color 0.2s ease;\n}\n\n.icon-button.active .icon-circle {\n  background: var(--state-switch-on-color, var(--warning-color, #ffc107));\n}\n\n.status-icon {\n  color: var(--text-primary-on-background, #ffffff);\n  --mdc-icon-size: 32px;\n}\n\n.content {\n  flex: 1;\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n  min-width: 0; /* Allow text truncation */\n}\n\n.title {\n  font-size: 16px;\n  font-weight: 500;\n  color: var(--primary-text-color, #212121);\n  line-height: 1.2;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n\n.subtitle {\n  font-size: 12px;\n  line-height: 1;\n  color: var(--secondary-text-color, #757575);\n}\n\n.max-time.max-time-hidden {\n  display: none;\n}\n\n.last-run.last-run-hidden {\n  display: none;\n}\n`;
       
       this.shadowRoot.innerHTML = `${fontLink}<style>${styleContent}</style>${htmlContent}`;
       

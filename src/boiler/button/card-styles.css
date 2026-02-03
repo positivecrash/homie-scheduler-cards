@@ -106,14 +106,6 @@
   opacity: 0.9;
 }
 
-.schedule-button:hover:not(.disabled) {
-  opacity: 0.9;
-}
-
-.schedule-button:active:not(.disabled) {
-  opacity: 0.8;
-}
-
 .schedule-button.active {
   background: var(--_button-bg-active);
   color: var(--_button-text-active);
