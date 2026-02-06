@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4]
+
+### Status
+
+- Register entity for Latest activity tracking (external turn-on recorded when app closed)
+- Latest activity: show duration with seconds (e.g. "4 min 30 s")
+
 ## [1.0.3]
 
 ### Button
