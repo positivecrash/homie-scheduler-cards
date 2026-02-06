@@ -1,6 +1,6 @@
 /**
  * Scheduler Boiler Status Card
- * Last build: 2026-02-03T13:23:34.060Z
+ * Last build: 2026-02-06T08:57:45.477Z
  * Version: 1.0.3
  */
 
@@ -700,6 +700,7 @@ class HomieBoilerStatusCard extends HTMLElement {
     this._bridgePollTimer = null;  // Poll bridge when entity turns on (bridge updates async)
     this._bridgePollCount = 0;
     this._bridgeStateOverride = null;  // Fresh bridge state from state_changed event (hass may be stale)
+    this._registeredForLastRun = false;  // So integration tracks this entity for Latest activity (incl. external turn-on)
   }
 
   async _loadTemplate() {
@@ -718,6 +719,15 @@ class HomieBoilerStatusCard extends HTMLElement {
       // Find bridge sensor on first hass set
       if (!this._bridgeSensor) {
         this._findBridgeSensor();
+      }
+
+      // Register entity for Latest activity tracking (so external turn-on is recorded when app is closed)
+      if (this._entryId && this._config?.entity && !this._registeredForLastRun && this._hass?.callService) {
+        this._registeredForLastRun = true;
+        this._hass.callService('homie_scheduler', 'register_entity_for_last_run', {
+          entry_id: this._entryId,
+          entity_id: this._config.entity
+        }).catch(() => {});
       }
       
       // Subscribe to state_changed events for bridge sensor and entity
@@ -1288,7 +1298,7 @@ class HomieBoilerStatusCard extends HTMLElement {
     }
   }
 
-  /** Last run text for current entity: "14:40 for 4 min". */
+  /** Last run text for current entity: "14:40 for 4 min 30 s". */
   _getLastRunText() {
     try {
       const bridgeState = this._getBridgeState();
@@ -1297,14 +1307,24 @@ class HomieBoilerStatusCard extends HTMLElement {
       const last = entityLastRuns[this._config.entity];
       if (!last || !last.started_at) return '';
       const startedAt = last.started_at;
-      const durationMin = last.duration_minutes != null ? parseInt(last.duration_minutes, 10) : 0;
       let timeStr = '';
       try {
         const d = new Date(startedAt);
         if (!isNaN(d.getTime())) timeStr = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
       } catch (_) {}
       if (!timeStr) timeStr = startedAt.slice(11, 16); // HH:MM from ISO
-      const durationStr = durationMin < 60 ? `${durationMin} min` : `${Math.floor(durationMin / 60)}h ${durationMin % 60} min`;
+      const totalSec = last.duration_seconds != null ? parseInt(last.duration_seconds, 10) : null;
+      let durationStr;
+      if (totalSec != null && !isNaN(totalSec)) {
+        const min = Math.floor(totalSec / 60);
+        const sec = totalSec % 60;
+        if (min >= 60) durationStr = `${Math.floor(min / 60)}h ${min % 60} min${sec ? ` ${sec} s` : ''}`;
+        else if (sec) durationStr = `${min} min ${sec} s`;
+        else durationStr = `${min} min`;
+      } else {
+        const durationMin = last.duration_minutes != null ? parseInt(last.duration_minutes, 10) : 0;
+        durationStr = durationMin < 60 ? `${durationMin} min` : `${Math.floor(durationMin / 60)}h ${durationMin % 60} min`;
+      }
       return `${timeStr} for ${durationStr}`;
     } catch (err) {
       return '';
