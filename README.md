@@ -45,7 +45,7 @@ Runs the boiler on a schedule without creating automations one by one: change ti
 
 ### Boiler run button
 
-![Boiler run buttons](https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-buttons.png)
+![Boiler run buttons](https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-buttons.webp)
 
 Set fixed run durations in the card. Configure your own set of duration buttons.
 
