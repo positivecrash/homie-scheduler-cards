@@ -1,6 +1,6 @@
 /**
  * Scheduler Boiler Slots Card
- * Last build: 2026-02-09T06:32:07.757Z
+ * Last build: 2026-02-09T08:09:24.767Z
  * Version: 1.0.4
  */
 window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.4';
