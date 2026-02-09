@@ -1,121 +1,83 @@
 /**
- * Homie Cards - Custom Style Overrides (template)
- *
- * Overrides CSS variables for all Homie cards on any Home Assistant theme.
- *
- * Usage:
- * 1. Copy this file to HA config: /config/www/homie/homie-custom-styles.css
- * 2. Add in Lovelace Resources: URL /local/homie/homie-custom-styles.css, Type: Stylesheet
- * 3. Uncomment the blocks you need and change variable values
+ * Homie Scheduler Cards – custom style overrides.
+ * Copy to /config/www/homie/homie-custom-styles.css, add as Lovelace Stylesheet.
+ * Set variables on home-assistant (cards are in shadow DOM).
  */
 
-/* ============================================
- * Global variables for all Homie cards
- * ============================================
- *
- * Uncomment the block you need and change variable values
- */
-
-/*
- * BUTTON CARDS — variables on home-assistant (inherited in shadow DOM)
- */
+/* Slots cards: homie-scheduler-boiler-slots, homie-scheduler-climate-slots */
 /*
 home-assistant {
-  --homie-button-accent: #4caf50;
-  --homie-button-radius: 16px;
-  --homie-button-bg-inactive: rgba(255, 255, 255, 0.12);
-  --homie-button-bg-active: #4caf50;
-  --homie-button-bg-disabled: rgba(255, 255, 255, 0.04);
-  --homie-button-text-inactive: #ffffff;
-  --homie-button-text-active: #ffffff;
-  --homie-button-text-disabled: rgba(255,255,255,0.3);
-  --homie-button-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  --homie-button-shadow-active: 0 4px 12px rgba(76,175,80,0.4);
-}
-*/
-
-/* ============================================
- * NOTE: Homie cards render INSIDE the shadow DOM of <home-assistant>.
- * Selectors like homie-scheduler-boiler-button are not visible in the main document.
- * Set CSS variables on home-assistant — they inherit into shadow DOM.
- * ============================================ */
-
-/*
- * SLOTS CARDS — variables on home-assistant
- * Popup (.popup-content) defaults/overrides listed below
- */
-/*
-home-assistant {
-  --homie-slots-accent: #4caf50;
-  --homie-slots-bg: var(--ha-card-background);
-  --homie-slots-radius: 12px;
-  --homie-slots-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  --homie-slots-text: var(--primary-text-color);
-  --homie-slots-text-secondary: var(--secondary-text-color);
-  --homie-slots-text-on-accent: #ffffff;
-  --homie-slots-disabled: var(--disabled-color);
-
-  --homie-slots-popup-background: var(--ha-dialog-background);
-  --homie-slots-popup-color: var(--primary-text-color);
+  --homie-slots-accent: var(--primary-color, #03a9f4);
+  --homie-slots-bg: var(--ha-card-background, rgba(255, 255, 255, 0.9));
+  --homie-slots-radius: var(--ha-card-border-radius, 8px);
+  --homie-slots-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));
+  --homie-slots-text: var(--primary-text-color, #212121);
+  --homie-slots-text-secondary: var(--secondary-text-color, #757575);
+  --homie-slots-text-on-accent: var(--text-primary-on-background, #ffffff);
+  --homie-slots-disabled: var(--disabled-color, #9e9e9e);
+  --homie-slots-bg-select: var(--ha-card-background, rgba(255, 255, 255, 0.9));
+  --homie-slots-divider-select: var(--divider-color, rgba(0, 0, 0, 0.12));
+  --homie-slots-text-select: var(--primary-text-color, #212121);
+  --homie-slots-radius-select: var(--mdc-shape-small, 4px);
+  --homie-slots-focus-ring: 0 0 0 2px rgba(3, 169, 244, 0.1);
+  --homie-slots-padding-input-vertical: var(--mdc-shape-small, 4px);
+  --homie-slots-padding-input-horizontal: var(--mdc-shape-small, 8px);
+  --homie-slots-border-input: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+  --homie-slots-radius-input: var(--mdc-shape-small, 4px);
+  --homie-slots-divider: var(--divider-color, rgba(0, 0, 0, 0.12));
+  --homie-slots-radius-small: var(--mdc-shape-small, 4px);
+  --homie-slots-radius-medium: var(--mdc-shape-medium, 8px);
+  --homie-slots-secondary-bg: var(--secondary-background-color, #f5f5f5);
+  --homie-slots-error-color: var(--error-color, #f44336);
+  --homie-slots-button-outline-padding: var(--mdc-button-horizontal-padding, 16px);
+  --homie-slots-button-outline-margin-top: var(--mdc-layout-grid-gutter, 12px);
+  --homie-slots-button-outline-radius: var(--ha-card-border-radius, 8px);
+  --homie-slots-button-outline-bg: transparent;
+  --homie-slots-button-outline-border: 2px solid var(--primary-color, #03a9f4);
+  --homie-slots-button-outline-color: var(--primary-color, #03a9f4);
+  --homie-slots-button-outline-font-size: var(--mdc-typography-button-font-size, 14px);
+  --homie-slots-button-outline-font-weight: var(--mdc-typography-button-font-weight, 900);
+  --homie-slots-button-outline-letter-spacing: var(--mdc-typography-button-letter-spacing, 0em);
+  --homie-slots-button-outline-min-height: var(--mdc-button-height, 36px);
+  --homie-slots-button-outline-hover-shadow: 0 2px 8px rgba(3, 169, 244, 0.3);
+  --homie-slots-button-outline-active-transform: scale(0.98);
+  --homie-slots-button-outline-active-shadow: 0 1px 4px rgba(3, 169, 244, 0.2);
+  --homie-slots-popup-background: var(--ha-dialog-background, var(--ha-card-background));
+  --homie-slots-popup-color: var(--primary-text-color, #212121);
   --homie-slots-popup-backdrop-filter: var(--ha-card-backdrop-filter, none);
   --homie-slots-popup-box-shadow: var(--ha-card-box-shadow, none);
   --homie-slots-popup-border-radius: var(--ha-card-border-radius, 16px);
 }
 */
 
-/*
- * STATUS CARD — variables on home-assistant
- */
+/* Button card: homie-scheduler-boiler-button */
 /*
 home-assistant {
-  --homie-status-accent: #ff9800;
-  --homie-status-bg: var(--ha-card-background);
-  --homie-status-radius: 8px;
-  --homie-status-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  --homie-status-text: var(--primary-text-color);
-  --homie-status-text-secondary: var(--secondary-text-color);
-  --homie-status-text-on-accent: #ffffff;
-  --homie-status-disabled: var(--disabled-color);
+  --homie-button-accent: var(--primary-color, #03a9f4);
+  --homie-button-radius: var(--ha-card-border-radius, 12px);
+  --homie-button-bg-inactive: var(--ha-card-background);
+  --homie-button-bg-active: var(--primary-color, #03a9f4);
+  --homie-button-bg-disabled: var(--ha-card-background);
+  --homie-button-text-inactive: var(--primary-color, #03a9f4);
+  --homie-button-text-active: var(--text-primary-color, #fff);
+  --homie-button-text-disabled: var(--disabled-text-color, rgba(255,255,255,0.5));
+  --homie-button-shadow: var(--ha-card-box-shadow, none);
+  --homie-button-shadow-active: var(--ha-card-box-shadow, none);
+  --homie-button-backdrop-filter: var(--ha-card-backdrop-filter, none);
+  --homie-button-border-color: var(--divider-color, rgba(255, 255, 255, 0.12));
 }
 */
 
-/* ============================================
- * Example overrides for different cards
- * ============================================ */
-
-/* Boiler schedule button only */
+/* Status card: homie-scheduler-boiler-status */
 /*
 home-assistant {
-  --homie-button-accent: #ff5722;
-  --homie-button-radius: 16px;
-}
-*/
-
-/* Slots cards only */
-/*
-home-assistant {
-  --homie-slot-radius: 8px;
-}
-*/
-
-/* ============================================
- * Theme adaptation (optional)
- * ============================================ */
-
-/* Light themes */
-/*
-@media (prefers-color-scheme: light) {
-  home-assistant {
-    --homie-button-accent: #1976d2;
-  }
-}
-*/
-
-/* Dark themes */
-/*
-@media (prefers-color-scheme: dark) {
-  home-assistant {
-    --homie-button-accent: #42a5f5;
-  }
+  --homie-status-accent: var(--state-switch-on-color, var(--warning-color, #ffc107));
+  --homie-status-bg: var(--ha-card-background, rgba(255, 255, 255, 0.9));
+  --homie-status-radius: var(--ha-card-border-radius, 4px);
+  --homie-status-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1));
+  --homie-status-text: var(--primary-text-color, #212121);
+  --homie-status-text-secondary: var(--secondary-text-color, #757575);
+  --homie-status-text-on-accent: var(--text-primary-on-background, #ffffff);
+  --homie-status-disabled: var(--disabled-color, #9e9e9e);
 }
 */
