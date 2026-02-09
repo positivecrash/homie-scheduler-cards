@@ -20,14 +20,14 @@ Lovelace cards for schedule management in Home Assistant. Set up in one click wh
 
 You can build the dashboard you prefer with customizable separate cards. See how the Water Heater dashboard is built (for the iOS theme I also overrode some CSS variables for the cards).
 
-![Boiler Homie Scheduler cards demonstration](https://raw.githubusercontent.com/positivecrash/homie-scheduler-cards/main/docs/images/Homie-Scheduler-Boiler-Cards.gif)
+![Boiler Homie Scheduler cards demonstration](https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/Homie-Scheduler-Boiler-Cards.gif)
 
 
 ## Water Heater cards features
 
 ### Boiler status
 
-![Boiler status](https://raw.githubusercontent.com/positivecrash/homie-scheduler-cards/main/docs/images/homie-scheduler-boiler-status.png)
+<p align="center"><img src="https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-status.png" alt="Boiler status" width="500"></p>
 
 - Latest activity status: when and for how long the boiler was switched on
 - Max run status: if set in the integration settings, shows max run time
@@ -39,13 +39,13 @@ You can build the dashboard you prefer with customizable separate cards. See how
 ### Boiler schedule slots
 
 
-![Boiler schedule slots](https://raw.githubusercontent.com/positivecrash/homie-scheduler-cards/main/docs/images/homie-scheduler-boiler-slots.png)
+<p align="center"><img src="https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-slots.png" alt="Boiler schedule slots" width="500"></p>
 
 Runs the boiler on a schedule without creating automations one by one: change times and weekdays, enable or disable slots, and set clear names—all from the card. For how the schedule is stored and enforced, see the [integration README](https://github.com/positivecrash/homie-scheduler-integration).
 
 ### Boiler run button
 
-![Boiler run buttons](https://raw.githubusercontent.com/positivecrash/homie-scheduler-cards/main/docs/images/homie-scheduler-boiler-buttons.png)
+<p align="center"><img src="https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-buttons.png" alt="Boiler run buttons" width="500"></p>
 
 Set fixed run durations in the card. Configure your own set of duration buttons.
 
