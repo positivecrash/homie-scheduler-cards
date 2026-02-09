@@ -8371,3 +8371,5 @@ if (typeof customElements !== 'undefined' && !customElements.get('homie-schedule
   customElements.define('homie-scheduler-climate-slots', HomieClimateScheduleSlotsCard);
   logCardInfo('climate-slots-card');
 }
+
+export {};

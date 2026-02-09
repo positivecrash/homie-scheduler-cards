@@ -41,6 +41,7 @@ const header = `/**
  */
 `;
 
-const bundle = header + parts.join('\n\n');
+// Output as ES module so it loads correctly as "JavaScript Module" in HA Resources / HACS
+const bundle = header + parts.join('\n\n') + '\nexport {};\n';
 fs.writeFileSync(path.join(DIST, 'homie-scheduler-cards.js'), bundle, 'utf8');
 console.log('✓ Bundle written: dist/homie-scheduler-cards.js (' + (bundle.length / 1024).toFixed(1) + ' KB)');
