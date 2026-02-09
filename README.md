@@ -2,6 +2,8 @@
 
 Lovelace cards for schedule management in Home Assistant. Set up in one click when to switch off your smart home device. Easy UI scheduler for intuitive run slots. The [Homie Scheduler](https://github.com/positivecrash/homie-scheduler-integration) integration supports all switch-like entities (switch, input_boolean, light, fan, cover) and climate. Cards are split by purpose because the UI for different devices should be different: boiler cards for water heaters and on/off appliances, climate cards for AC and thermostats (e.g. underfloor heating). More card variants are planned.
 
+[![Open your Home Assistant instance and open a repository in the HACS store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=positivecrash&repository=homie-scheduler-cards&category=plugin)
+
 ## Cards list
 
 - **Boiler slots** – add/edit schedule slots for boiler/switch (time, duration, weekdays)
@@ -50,8 +52,12 @@ Set fixed run durations in the card. Configure your own set of duration buttons.
 
 ## Installation
 
-1. Copy all files from `dist/` (the `.js` files and `homie-custom-styles.css`) into your Home Assistant config under `config/www/homie/` (create the `homie` folder if needed).
-2. In HA: **Settings → Dashboards → Resources** → add each `.js` card file from `/local/homie/` as a **JavaScript Module**. Optionally add `/local/homie/homie-custom-styles.css` as **Stylesheet**. Then add cards to the dashboard (e.g. `type: custom:homie-scheduler-boiler-slots`).
+1. Copy files from `dist/` into your Home Assistant config under `config/www/homie/` (create the `homie` folder if needed).
+2. In HA: **Settings → Dashboards → Resources** → add **one** resource:
+   - **`homie-scheduler-cards.js`** as **JavaScript Module** — this single file includes all cards (boiler button, status, slots, climate slots).
+   Optionally add **`homie-custom-styles.css`** as **Stylesheet**. Then add cards to the dashboard (e.g. `type: custom:homie-scheduler-boiler-slots`).
+
+   *Alternatively*, you can add each card file from `dist/` as a separate JavaScript Module instead of the bundle.
 
 
 ---
@@ -70,7 +76,7 @@ homie-scheduler-cards/
 │   │   └── slots/        # Climate schedule slots card
 │   ├── shared/           # Shared build script and components
 │   └── homie-custom-styles.css  # Template for custom styles
-├── dist/                  # Build output (loader + all .js + homie-custom-styles.css)
+├── dist/                  # Build output (bundle homie-scheduler-cards.js + individual .js + homie-custom-styles.css)
 │
 └── README.md
 ```
@@ -155,9 +161,10 @@ cd src/boiler/button && bash build.sh
 cd src/boiler/slots  && bash build.sh
 cd src/boiler/status && bash build.sh
 cd src/climate/slots && bash build.sh
+node build-bundle.js
 ```
 
-Output goes to `dist/` (and `homie-custom-styles.css` is copied there on each build).
+Output goes to `dist/`. The last step builds **homie-scheduler-cards.js** as a single bundle of all cards (for one-file install). `homie-custom-styles.css` is copied to `dist/` on each card build.
 
 
 ## License
