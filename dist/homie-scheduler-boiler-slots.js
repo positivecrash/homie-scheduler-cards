@@ -1,9 +1,9 @@
 /**
  * Scheduler Boiler Slots Card
- * Last build: 2026-02-09T11:07:17.443Z
- * Version: 1.0.4
+ * Last build: 2026-02-09T15:36:46.590Z
+ * Version: 1.0.5
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.4';
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.5';
 
 // Shared Components (auto-included from shared/)
 // Shared component: card-console-info/card-console-info.js
@@ -277,6 +277,49 @@ if (typeof window.ScheduleHelper === 'undefined') {
 if (typeof window.DurationSelector === 'undefined') {
   window.DurationSelector = class DurationSelector {
   /**
+   * Compute step so the slider can reach max (step must divide range).
+   * Picks a divisor of (max - min) closest to preferredStep.
+   */
+  static computeStep(min, max, preferredStep = 15) {
+    const range = max - min;
+    if (range <= 0) return 1;
+    if (preferredStep >= range) return range;
+    const divisors = [];
+    for (let i = 1; i <= range; i++) {
+      if (range % i === 0) divisors.push(i);
+    }
+    if (divisors.length === 0) return 1;
+    let best = divisors[0];
+    for (let j = 0; j < divisors.length; j++) {
+      const d = divisors[j];
+      if (Math.abs(d - preferredStep) < Math.abs(best - preferredStep)) best = d;
+    }
+    return best;
+  }
+
+  /**
+   * Build list of allowed duration values: multiples of stepBase (5) from min up to max,
+   * plus max itself if it's not a multiple of 5 (e.g. 66, 69, 63).
+   * Example: min=5, max=66 → [5,10,15,...,60,65,66]; max=63 → [5,10,...,60,63].
+   * @param {number} min - Minimum value
+   * @param {number} max - Maximum value
+   * @param {number} stepBase - Base step for "nice" values (default 5)
+   * @returns {number[]} Allowed values; slider will use index into this array
+   */
+  static computeAllowedValues(min, max, stepBase = 5) {
+    if (max < min) return [min];
+    const list = [];
+    let v = Math.ceil(min / stepBase) * stepBase;
+    if (v > min) list.push(min);
+    while (v <= max) {
+      list.push(v);
+      v += stepBase;
+    }
+    if (list.length && list[list.length - 1] < max) list.push(max);
+    return list;
+  }
+
+  /**
    * Get selected duration value
    * @param {HTMLElement} shadowRoot - Shadow root of the card or container element
    * @returns {number|null} Duration in minutes, or null if no duration
@@ -312,14 +355,28 @@ if (typeof window.DurationSelector === 'undefined') {
    * @param {number|null} duration - Duration in minutes, or null to clear
    */
   static setSelectedDuration(shadowRoot, duration) {
-    // Use data-action selectors - works for both popup and slot
-    const input = shadowRoot.querySelector('[data-action="update-duration"]');
-    const slider = shadowRoot.querySelector('[data-action="update-duration-slider"]');
+    const wrapper = shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')
+      ? shadowRoot
+      : shadowRoot.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || shadowRoot).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || shadowRoot).querySelector('[data-action="update-duration-slider"]');
     if (input) {
-      input.value = duration ? String(duration) : '';
+      input.value = duration != null && duration !== '' ? String(duration) : '';
     }
     if (slider) {
-      slider.value = duration ? String(duration) : '';
+      const valuesStr = wrapper && wrapper.dataset.durationValues;
+      const allowedValues = valuesStr ? valuesStr.split(',').map(Number) : null;
+      if (allowedValues && allowedValues.length && duration != null && duration !== '') {
+        const d = parseInt(duration, 10);
+        let idx = allowedValues.indexOf(d);
+        if (idx < 0) {
+          idx = allowedValues.reduce((best, _, i) =>
+            Math.abs(allowedValues[i] - d) < Math.abs(allowedValues[best] - d) ? i : best, 0);
+        }
+        slider.value = String(idx);
+      } else {
+        slider.value = duration != null && duration !== '' ? String(duration) : '';
+      }
     }
   }
 
@@ -354,41 +411,61 @@ if (typeof window.DurationSelector === 'undefined') {
     
     if (!input || !slider) return;
     
-    // Remove old listeners by cloning
     const newInput = input.cloneNode(true);
     const newSlider = slider.cloneNode(true);
     input.parentNode.replaceChild(newInput, input);
     slider.parentNode.replaceChild(newSlider, slider);
     
-    // Single source of truth for duration value
-    let currentValue = parseInt(newInput.value) || parseInt(newSlider.value) || 0;
+    const valuesStr = wrapper.dataset.durationValues;
+    const allowedValues = valuesStr ? valuesStr.split(',').map(Number) : null;
+    let currentValue = parseInt(newInput.value, 10);
+    if (isNaN(currentValue) && allowedValues && allowedValues.length) currentValue = allowedValues[0];
+    if (allowedValues && allowedValues.length) {
+      let idx = allowedValues.indexOf(currentValue);
+      if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
+        Math.abs(allowedValues[i] - currentValue) < Math.abs(allowedValues[best] - currentValue) ? i : best, 0);
+      newSlider.value = String(idx);
+      newInput.value = String(allowedValues[idx]);
+    }
     
-    // Sync slider -> input
     const sliderInputHandler = (e) => {
-      currentValue = parseInt(e.target.value);
-      newInput.value = String(currentValue);
-      newInput.setAttribute('value', String(currentValue));
+      const raw = parseInt(e.target.value, 10);
+      if (allowedValues && allowedValues.length) {
+        currentValue = allowedValues[Math.min(raw, allowedValues.length - 1)];
+        newInput.value = String(currentValue);
+      } else {
+        currentValue = raw;
+        newInput.value = String(currentValue);
+      }
+      newInput.setAttribute('value', newInput.value);
     };
     newSlider.addEventListener('input', sliderInputHandler);
     newSlider.addEventListener('change', sliderInputHandler);
     
-    // Sync input -> slider (with validation)
     const inputChangeHandler = (e) => {
-      const value = parseInt(e.target.value);
-      const min = parseInt(newInput.min) || 0;
-      const max = parseInt(newInput.max) || 1440;
-      
+      const value = parseInt(e.target.value, 10);
+      const min = parseInt(newInput.min, 10) || 0;
+      const max = parseInt(newInput.max, 10) || 1440;
       if (!isNaN(value)) {
-        const clampedValue = Math.max(min, Math.min(max, value));
-        currentValue = clampedValue;
-        newSlider.value = String(currentValue);
-        newSlider.setAttribute('value', String(currentValue));
-        newInput.value = String(currentValue);
-        newInput.setAttribute('value', String(currentValue));
+        const clamped = Math.max(min, Math.min(max, value));
+        currentValue = clamped;
+        newInput.value = String(clamped);
+        newInput.setAttribute('value', String(clamped));
+        if (allowedValues && allowedValues.length) {
+          let idx = allowedValues.indexOf(clamped);
+          if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
+            Math.abs(allowedValues[i] - clamped) < Math.abs(allowedValues[best] - clamped) ? i : best, 0);
+          newSlider.value = String(idx);
+        } else {
+          newSlider.value = String(clamped);
+        }
+        newSlider.setAttribute('value', newSlider.value);
       }
     };
     newInput.addEventListener('input', inputChangeHandler);
     newInput.addEventListener('change', inputChangeHandler);
+    newInput.addEventListener('click', (e) => e.stopPropagation());
+    newSlider.addEventListener('click', (e) => e.stopPropagation());
   }
 
   /**
@@ -407,33 +484,45 @@ if (typeof window.DurationSelector === 'undefined') {
    * @param {Object} config - Optional config with min_duration, max_duration, duration_step
    */
   static setDurationInSlot(slotCard, duration, config = null) {
-    const input = slotCard.querySelector('[data-action="update-duration"]');
-    const slider = slotCard.querySelector('[data-action="update-duration-slider"]');
+    const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
+      ? slotCard
+      : slotCard.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
     
-    // Update min/max/step if config provided
-    if (config) {
+    if (config && (input || slider)) {
       const minDuration = config.min_duration || 15;
       const maxDuration = config.max_duration || 1440;
-      const durationStep = config.duration_step || 15;
-      
+      const allowedValues = this.computeAllowedValues(minDuration, maxDuration, 5);
+      if (wrapper) wrapper.dataset.durationValues = allowedValues.join(',');
       if (input) {
         input.min = minDuration;
         input.max = maxDuration;
-        input.step = durationStep;
+        input.step = 1;
       }
       if (slider) {
-        slider.min = minDuration;
-        slider.max = maxDuration;
-        slider.step = durationStep;
+        slider.min = 0;
+        slider.max = Math.max(0, allowedValues.length - 1);
+        slider.step = 1;
       }
     }
     
-    // Update values
     if (input) {
-      input.value = duration ? String(duration) : '';
+      input.value = duration != null && duration !== '' ? String(duration) : '';
     }
-    if (slider) {
-      slider.value = duration ? String(duration) : '';
+    if (slider && wrapper && wrapper.dataset.durationValues) {
+      const allowedValues = wrapper.dataset.durationValues.split(',').map(Number);
+      const d = parseInt(duration, 10);
+      if (!isNaN(d)) {
+        let idx = allowedValues.indexOf(d);
+        if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
+          Math.abs(allowedValues[i] - d) < Math.abs(allowedValues[best] - d) ? i : best, 0);
+        slider.value = String(idx);
+      } else {
+        slider.value = '0';
+      }
+    } else if (slider) {
+      slider.value = duration != null && duration !== '' ? String(duration) : '';
     }
   }
 
@@ -444,68 +533,80 @@ if (typeof window.DurationSelector === 'undefined') {
    * @param {Object} config - Optional config with min_duration, max_duration, duration_step
    */
   static attachEventListenersInSlot(slotCard, onChangeCallback, config = null) {
-    const input = slotCard.querySelector('[data-action="update-duration"]');
-    const slider = slotCard.querySelector('[data-action="update-duration-slider"]');
+    const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
+      ? slotCard
+      : slotCard.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
     
-    // Update min/max/step if config provided
     if (config && input && slider) {
       const minDuration = config.min_duration || 15;
       const maxDuration = config.max_duration || 1440;
-      const durationStep = config.duration_step || 15;
-      
+      const allowedValues = this.computeAllowedValues(minDuration, maxDuration, 5);
+      if (wrapper) wrapper.dataset.durationValues = allowedValues.join(',');
       input.min = minDuration;
       input.max = maxDuration;
-      input.step = durationStep;
-      slider.min = minDuration;
-      slider.max = maxDuration;
-      slider.step = durationStep;
+      input.step = 1;
+      slider.min = 0;
+      slider.max = Math.max(0, allowedValues.length - 1);
+      slider.step = 1;
     }
     
     if (input && slider) {
-      // Remove old listeners by cloning FIRST
       const newInput = input.cloneNode(true);
       const newSlider = slider.cloneNode(true);
       input.parentNode.replaceChild(newInput, input);
       slider.parentNode.replaceChild(newSlider, slider);
       
-      // Single source of truth for duration value (from cloned elements)
-      let currentValue = parseInt(newInput.value) || parseInt(newSlider.value) || 0;
+      const valuesStr = wrapper && wrapper.dataset.durationValues;
+      const allowedValues = valuesStr ? valuesStr.split(',').map(Number) : null;
+      let currentValue = parseInt(newInput.value, 10);
+      if (isNaN(currentValue) && allowedValues && allowedValues.length) currentValue = allowedValues[0];
+      if (allowedValues && allowedValues.length) {
+        let idx = allowedValues.indexOf(currentValue);
+        if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
+          Math.abs(allowedValues[i] - currentValue) < Math.abs(allowedValues[best] - currentValue) ? i : best, 0);
+        newSlider.value = String(idx);
+        newInput.value = String(allowedValues[idx]);
+      }
       
-      // Sync slider -> input (using newSlider and newInput)
       const sliderHandler = (e) => {
-        currentValue = parseInt(e.target.value);
-        newInput.value = String(currentValue);
-        newInput.setAttribute('value', String(currentValue));
-        if (onChangeCallback) {
-          onChangeCallback(currentValue);
-        }
-      };
-      
-      // Sync input -> slider (with validation, using newInput and newSlider)
-      const inputHandler = (e) => {
-        const value = parseInt(e.target.value);
-        const min = parseInt(newInput.min) || 0;
-        const max = parseInt(newInput.max) || 1440;
-        
-        if (!isNaN(value)) {
-          const clampedValue = Math.max(min, Math.min(max, value));
-          currentValue = clampedValue;
-          newSlider.value = String(currentValue);
-          newSlider.setAttribute('value', String(currentValue));
+        const raw = parseInt(e.target.value, 10);
+        if (allowedValues && allowedValues.length) {
+          currentValue = allowedValues[Math.min(raw, allowedValues.length - 1)];
           newInput.value = String(currentValue);
-          newInput.setAttribute('value', String(currentValue));
-          if (onChangeCallback) {
-            onChangeCallback(currentValue);
+        } else {
+          currentValue = raw;
+          newInput.value = String(currentValue);
+        }
+        newInput.setAttribute('value', newInput.value);
+        if (onChangeCallback) onChangeCallback(currentValue);
+      };
+      
+      const inputHandler = (e) => {
+        const value = parseInt(e.target.value, 10);
+        const min = parseInt(newInput.min, 10) || 0;
+        const max = parseInt(newInput.max, 10) || 1440;
+        if (!isNaN(value)) {
+          const clamped = Math.max(min, Math.min(max, value));
+          currentValue = clamped;
+          newInput.value = String(clamped);
+          newInput.setAttribute('value', String(clamped));
+          if (allowedValues && allowedValues.length) {
+            let idx = allowedValues.indexOf(clamped);
+            if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
+              Math.abs(allowedValues[i] - clamped) < Math.abs(allowedValues[best] - clamped) ? i : best, 0);
+            newSlider.value = String(idx);
+          } else {
+            newSlider.value = String(clamped);
           }
+          newSlider.setAttribute('value', newSlider.value);
+          if (onChangeCallback) onChangeCallback(currentValue);
         } else if (e.target.value === '') {
-          // Allow empty value (for climate cards where duration is optional)
-          if (onChangeCallback) {
-            onChangeCallback(null);
-          }
+          if (onChangeCallback) onChangeCallback(null);
         }
       };
       
-      // Attach new listeners to cloned elements
       newSlider.addEventListener('input', sliderHandler);
       newSlider.addEventListener('change', sliderHandler);
       newInput.addEventListener('input', inputHandler);
@@ -1050,6 +1151,17 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     }
   }
 
+  /** Max duration for slots: capped by integration "Max run time" (entity_max_runtime) for this entity. */
+  _getEffectiveMaxDuration() {
+    const configMax = this._config?.max_duration || 1440;
+    const bridgeState = this._getBridgeState();
+    const entityMaxRuntime = (bridgeState?.attributes?.entity_max_runtime || {})[this._config?.entity];
+    if (entityMaxRuntime > 0) {
+      return Math.min(configMax, entityMaxRuntime);
+    }
+    return configMax;
+  }
+
   _getItems() {
     try {
       // Safe check - if no config or entity, return empty array
@@ -1422,29 +1534,32 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
         return;
       }
       
-      
-      // Set min, max, step for duration selector FIRST
+      // Allowed values: 5, 10, 15, ... up to max, plus max if not multiple of 5 (e.g. 66, 63)
       const durationInput = popupDurationWrapper.querySelector('[data-action="update-duration"]');
       const durationSlider = popupDurationWrapper.querySelector('[data-action="update-duration-slider"]');
       const minDuration = this._config.min_duration || 15;
-      const maxDuration = this._config.max_duration || 1440;
-      const durationStep = this._config.duration_step || 15;
-      const defaultDuration = minDuration;
-      
+      const maxDuration = this._getEffectiveMaxDuration();
+      const allowedValues = window.DurationSelector && typeof window.DurationSelector.computeAllowedValues === 'function'
+        ? window.DurationSelector.computeAllowedValues(minDuration, maxDuration, 5)
+        : (() => { const a = []; for (let i = minDuration; i <= maxDuration; i += 5) a.push(i); if (a[a.length - 1] < maxDuration) a.push(maxDuration); return a; })();
+      const defaultDuration = Math.min(minDuration, maxDuration);
+      popupDurationWrapper.dataset.durationValues = allowedValues.join(',');
       
       if (durationInput) {
         durationInput.min = minDuration;
         durationInput.max = maxDuration;
-        durationInput.step = durationStep;
+        durationInput.step = 1;
         durationInput.value = String(defaultDuration);
         durationInput.setAttribute('value', String(defaultDuration));
       }
       if (durationSlider) {
-        durationSlider.min = minDuration;
-        durationSlider.max = maxDuration;
-        durationSlider.step = durationStep;
-        durationSlider.value = String(defaultDuration);
-        durationSlider.setAttribute('value', String(defaultDuration));
+        durationSlider.min = 0;
+        durationSlider.max = Math.max(0, allowedValues.length - 1);
+        durationSlider.step = 1;
+        const defaultIdx = allowedValues.indexOf(defaultDuration);
+        const idx = defaultIdx >= 0 ? defaultIdx : 0;
+        durationSlider.value = String(idx);
+        durationSlider.setAttribute('value', String(idx));
       }
       
       // Attach duration selector event listeners to popup wrapper specifically
@@ -1755,8 +1870,8 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       minutesSelect.value = roundedMinutes;
     }
 
-    // Update duration select
-    DurationSelector.setDurationInSlot(slotCard, updatedItem.duration, this._config);
+    // Update duration select (config with effective max for allowed values 5,10,...,max)
+    DurationSelector.setDurationInSlot(slotCard, updatedItem.duration, { ...this._config, max_duration: this._getEffectiveMaxDuration() });
 
     // Update weekday selector state
     WeekdaySelector.setSelectedWeekdays(this.shadowRoot, updatedItem.weekdays, slotCard);
@@ -1961,11 +2076,13 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       return;
     }
     
-    // Replace duration placeholders in popup template
+    // Replace duration placeholders (step computed so slider can reach max)
     const minDuration = this._config.min_duration || 15;
-    const maxDuration = this._config.max_duration || 1440;
-    const durationStep = this._config.duration_step || 15;
-    const defaultDuration = minDuration;
+    const maxDuration = this._getEffectiveMaxDuration();
+    const durationStep = window.DurationSelector && typeof window.DurationSelector.computeStep === 'function'
+      ? window.DurationSelector.computeStep(minDuration, maxDuration, this._config.duration_step || 15)
+      : (this._config.duration_step || 15);
+    const defaultDuration = Math.min(minDuration, maxDuration);
     
     let processedTemplate = template
       .replace(/\{\{DURATION_MIN\}\}/g, minDuration)
@@ -2038,10 +2155,12 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       timeMinutesPlaceholders[`TIME_MINUTES_${minuteStr}`] = minuteStr === roundedMinutes ? 'selected' : '';
     }
 
-    // Replace placeholders
+    // Replace placeholders (step computed so slider can reach max)
     const minDuration = this._config.min_duration || 15;
-    const maxDuration = this._config.max_duration || 1440;
-    const durationStep = this._config.duration_step || 15;
+    const maxDuration = this._getEffectiveMaxDuration();
+    const durationStep = window.DurationSelector && typeof window.DurationSelector.computeStep === 'function'
+      ? window.DurationSelector.computeStep(minDuration, maxDuration, this._config.duration_step || 15)
+      : (this._config.duration_step || 15);
     const durationValue = item.duration || minDuration;
     
     let result = template
@@ -2056,7 +2175,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       .replace(/\{\{DURATION_MIN\}\}/g, minDuration)
       .replace(/\{\{DURATION_MAX\}\}/g, maxDuration)
       .replace(/\{\{DURATION_STEP\}\}/g, durationStep)
-      .replace(/\{\{DURATION_VALUE\}\}/g, durationValue);
+      .replace(/\{\{DURATION_VALUE\}\}/g, Math.min(durationValue, maxDuration));
     
     // Replace time hour placeholders
     for (let i = 0; i < 24; i++) {
@@ -2270,14 +2389,13 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
         newMinutesSelect.value = roundedMinutes;
       }
 
-      // Update duration - use shared component
-      // First, set the initial duration value
-      DurationSelector.setDurationInSlot(itemEl, item.duration, this._config);
-      // Then attach event listeners
+      // Update duration - use shared component (allowed values 5,10,...,max)
+      const durationConfig = { ...this._config, max_duration: this._getEffectiveMaxDuration() };
+      DurationSelector.setDurationInSlot(itemEl, item.duration, durationConfig);
       DurationSelector.attachEventListenersInSlot(itemEl, (duration) => {
         if (itemEl.dataset.updating === 'true') return;
         this._updateItem(itemId, { duration });
-      }, this._config);
+      }, durationConfig);
 
       // Weekday selector - use shared component
       // Attach event listeners for this specific slot's weekday selector

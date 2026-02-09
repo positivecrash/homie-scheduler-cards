@@ -1320,10 +1320,12 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       hvacModesOptions = '<option value="heat">Heat</option><option value="cool">Cool</option>';
     }
     
-    // Replace duration placeholders in popup template
+    // Replace duration placeholders (step computed so slider can reach max)
     const minDuration = this._config.min_duration || 15;
     const maxDuration = this._config.max_duration || 1440;
-    const durationStep = this._config.duration_step || 15;
+    const durationStep = window.DurationSelector && typeof window.DurationSelector.computeStep === 'function'
+      ? window.DurationSelector.computeStep(minDuration, maxDuration, this._config.duration_step || 15)
+      : (this._config.duration_step || 15);
     // For climate, default duration is null (empty)
     const defaultDuration = '';
     
@@ -1429,10 +1431,12 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       timeMinutesPlaceholders[`TIME_MINUTES_${minuteStr}`] = minuteStr === roundedMinutes ? 'selected' : '';
     }
 
-    // Replace duration placeholders
+    // Replace duration placeholders (step computed so slider can reach max)
     const minDuration = this._config.min_duration || 15;
     const maxDuration = this._config.max_duration || 1440;
-    const durationStep = this._config.duration_step || 15;
+    const durationStep = window.DurationSelector && typeof window.DurationSelector.computeStep === 'function'
+      ? window.DurationSelector.computeStep(minDuration, maxDuration, this._config.duration_step || 15)
+      : (this._config.duration_step || 15);
     const durationValue = item.duration || '';
     
     // Replace placeholders
@@ -1541,25 +1545,26 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       durationEnabledCheckbox.addEventListener('change', (e) => {
         if (e.target.checked) {
           durationWrapper.style.display = 'block';
-          // Set min, max, step for duration selector
+          // Allowed values: 5, 10, 15, ... up to max, plus max if not multiple of 5
           const durationInput = durationWrapper.querySelector('[data-action="update-duration"]');
           const durationSlider = durationWrapper.querySelector('[data-action="update-duration-slider"]');
           const minDuration = this._config.min_duration || 15;
           const maxDuration = this._config.max_duration || 1440;
-          const durationStep = this._config.duration_step || 15;
+          const allowedValues = window.DurationSelector && typeof window.DurationSelector.computeAllowedValues === 'function'
+            ? window.DurationSelector.computeAllowedValues(minDuration, maxDuration, 5)
+            : (() => { const a = []; for (let i = minDuration; i <= maxDuration; i += 5) a.push(i); if (a[a.length - 1] < maxDuration) a.push(maxDuration); return a; })();
+          durationWrapper.dataset.durationValues = allowedValues.join(',');
           if (durationInput) {
             durationInput.min = minDuration;
             durationInput.max = maxDuration;
-            durationInput.step = durationStep;
+            durationInput.step = 1;
           }
           if (durationSlider) {
-            durationSlider.min = minDuration;
-            durationSlider.max = maxDuration;
-            durationSlider.step = durationStep;
+            durationSlider.min = 0;
+            durationSlider.max = Math.max(0, allowedValues.length - 1);
+            durationSlider.step = 1;
           }
-          // Set minimum value when checkbox is checked
           DurationSelector.setSelectedDuration(durationWrapper, minDuration);
-          // Attach event listeners for duration selector inside wrapper
           DurationSelector.attachEventListeners(durationWrapper);
         } else {
           durationWrapper.style.display = 'none';

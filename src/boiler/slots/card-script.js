@@ -386,6 +386,17 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     }
   }
 
+  /** Max duration for slots: capped by integration "Max run time" (entity_max_runtime) for this entity. */
+  _getEffectiveMaxDuration() {
+    const configMax = this._config?.max_duration || 1440;
+    const bridgeState = this._getBridgeState();
+    const entityMaxRuntime = (bridgeState?.attributes?.entity_max_runtime || {})[this._config?.entity];
+    if (entityMaxRuntime > 0) {
+      return Math.min(configMax, entityMaxRuntime);
+    }
+    return configMax;
+  }
+
   _getItems() {
     try {
       // Safe check - if no config or entity, return empty array
@@ -758,29 +769,32 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
         return;
       }
       
-      
-      // Set min, max, step for duration selector FIRST
+      // Allowed values: 5, 10, 15, ... up to max, plus max if not multiple of 5 (e.g. 66, 63)
       const durationInput = popupDurationWrapper.querySelector('[data-action="update-duration"]');
       const durationSlider = popupDurationWrapper.querySelector('[data-action="update-duration-slider"]');
       const minDuration = this._config.min_duration || 15;
-      const maxDuration = this._config.max_duration || 1440;
-      const durationStep = this._config.duration_step || 15;
-      const defaultDuration = minDuration;
-      
+      const maxDuration = this._getEffectiveMaxDuration();
+      const allowedValues = window.DurationSelector && typeof window.DurationSelector.computeAllowedValues === 'function'
+        ? window.DurationSelector.computeAllowedValues(minDuration, maxDuration, 5)
+        : (() => { const a = []; for (let i = minDuration; i <= maxDuration; i += 5) a.push(i); if (a[a.length - 1] < maxDuration) a.push(maxDuration); return a; })();
+      const defaultDuration = Math.min(minDuration, maxDuration);
+      popupDurationWrapper.dataset.durationValues = allowedValues.join(',');
       
       if (durationInput) {
         durationInput.min = minDuration;
         durationInput.max = maxDuration;
-        durationInput.step = durationStep;
+        durationInput.step = 1;
         durationInput.value = String(defaultDuration);
         durationInput.setAttribute('value', String(defaultDuration));
       }
       if (durationSlider) {
-        durationSlider.min = minDuration;
-        durationSlider.max = maxDuration;
-        durationSlider.step = durationStep;
-        durationSlider.value = String(defaultDuration);
-        durationSlider.setAttribute('value', String(defaultDuration));
+        durationSlider.min = 0;
+        durationSlider.max = Math.max(0, allowedValues.length - 1);
+        durationSlider.step = 1;
+        const defaultIdx = allowedValues.indexOf(defaultDuration);
+        const idx = defaultIdx >= 0 ? defaultIdx : 0;
+        durationSlider.value = String(idx);
+        durationSlider.setAttribute('value', String(idx));
       }
       
       // Attach duration selector event listeners to popup wrapper specifically
@@ -1091,8 +1105,8 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       minutesSelect.value = roundedMinutes;
     }
 
-    // Update duration select
-    DurationSelector.setDurationInSlot(slotCard, updatedItem.duration, this._config);
+    // Update duration select (config with effective max for allowed values 5,10,...,max)
+    DurationSelector.setDurationInSlot(slotCard, updatedItem.duration, { ...this._config, max_duration: this._getEffectiveMaxDuration() });
 
     // Update weekday selector state
     WeekdaySelector.setSelectedWeekdays(this.shadowRoot, updatedItem.weekdays, slotCard);
@@ -1297,11 +1311,13 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       return;
     }
     
-    // Replace duration placeholders in popup template
+    // Replace duration placeholders (step computed so slider can reach max)
     const minDuration = this._config.min_duration || 15;
-    const maxDuration = this._config.max_duration || 1440;
-    const durationStep = this._config.duration_step || 15;
-    const defaultDuration = minDuration;
+    const maxDuration = this._getEffectiveMaxDuration();
+    const durationStep = window.DurationSelector && typeof window.DurationSelector.computeStep === 'function'
+      ? window.DurationSelector.computeStep(minDuration, maxDuration, this._config.duration_step || 15)
+      : (this._config.duration_step || 15);
+    const defaultDuration = Math.min(minDuration, maxDuration);
     
     let processedTemplate = template
       .replace(/\{\{DURATION_MIN\}\}/g, minDuration)
@@ -1374,10 +1390,12 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       timeMinutesPlaceholders[`TIME_MINUTES_${minuteStr}`] = minuteStr === roundedMinutes ? 'selected' : '';
     }
 
-    // Replace placeholders
+    // Replace placeholders (step computed so slider can reach max)
     const minDuration = this._config.min_duration || 15;
-    const maxDuration = this._config.max_duration || 1440;
-    const durationStep = this._config.duration_step || 15;
+    const maxDuration = this._getEffectiveMaxDuration();
+    const durationStep = window.DurationSelector && typeof window.DurationSelector.computeStep === 'function'
+      ? window.DurationSelector.computeStep(minDuration, maxDuration, this._config.duration_step || 15)
+      : (this._config.duration_step || 15);
     const durationValue = item.duration || minDuration;
     
     let result = template
@@ -1392,7 +1410,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       .replace(/\{\{DURATION_MIN\}\}/g, minDuration)
       .replace(/\{\{DURATION_MAX\}\}/g, maxDuration)
       .replace(/\{\{DURATION_STEP\}\}/g, durationStep)
-      .replace(/\{\{DURATION_VALUE\}\}/g, durationValue);
+      .replace(/\{\{DURATION_VALUE\}\}/g, Math.min(durationValue, maxDuration));
     
     // Replace time hour placeholders
     for (let i = 0; i < 24; i++) {
@@ -1606,14 +1624,13 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
         newMinutesSelect.value = roundedMinutes;
       }
 
-      // Update duration - use shared component
-      // First, set the initial duration value
-      DurationSelector.setDurationInSlot(itemEl, item.duration, this._config);
-      // Then attach event listeners
+      // Update duration - use shared component (allowed values 5,10,...,max)
+      const durationConfig = { ...this._config, max_duration: this._getEffectiveMaxDuration() };
+      DurationSelector.setDurationInSlot(itemEl, item.duration, durationConfig);
       DurationSelector.attachEventListenersInSlot(itemEl, (duration) => {
         if (itemEl.dataset.updating === 'true') return;
         this._updateItem(itemId, { duration });
-      }, this._config);
+      }, durationConfig);
 
       // Weekday selector - use shared component
       // Attach event listeners for this specific slot's weekday selector

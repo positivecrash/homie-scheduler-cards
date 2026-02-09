@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.5]
+
+### Status
+
+- Compatible with integration 1.0.5: status card still calls `register_entity_for_last_run` when it loads so the entity is added to latest-activity tracking (stored in integration Store)
+
+### Slots
+
+- Configurable duration step fix: card config `duration_step` (minutes) for add-slot and edit duration selector; default 15
+
 ## [1.0.4]
 
 ### Status
