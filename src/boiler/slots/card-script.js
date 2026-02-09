@@ -1806,5 +1806,5 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-boiler-slots')) {
   customElements.define('homie-scheduler-boiler-slots', HomieBoilerScheduleSlotsCard);
-  logCardInfo('boiler-slots-card');
+  window.logCardInfo('boiler-slots-card');
 }
