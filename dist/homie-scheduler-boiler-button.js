@@ -1,6 +1,6 @@
 /**
  * Scheduler Boiler Button Card
- * Last build: 2026-02-09T08:09:18.748Z
+ * Last build: 2026-02-09T11:07:03.542Z
  * Version: 1.0.4
  */
 window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.4';
@@ -13,18 +13,20 @@ window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.4';
 /**
  * Shared console info for Homie Scheduler cards.
  * Logs branded card name and release version (set at build time).
+ * Uses window.logCardInfo so the bundle can include this file multiple times (one per card) without redeclaration error.
  */
-
-function logCardInfo(cardName) {
-  var version = typeof window.__HOMIE_SCHEDULER_CARDS_VERSION !== 'undefined'
-    ? window.__HOMIE_SCHEDULER_CARDS_VERSION
-    : 'dev';
-  var label = cardName + ' v' + version;
-  console.info(
-    '%c Homie Scheduler %c ' + label,
-    'color: white; background:rgb(94, 94, 243); font-weight: 700; padding 5px;',
-    'color: rgb(94, 94, 243); background: white; font-weight: 700; padding 5px;'
-  );
+if (typeof window.logCardInfo === 'undefined') {
+  window.logCardInfo = function (cardName) {
+    var version = typeof window.__HOMIE_SCHEDULER_CARDS_VERSION !== 'undefined'
+      ? window.__HOMIE_SCHEDULER_CARDS_VERSION
+      : 'dev';
+    var label = cardName + ' v' + version;
+    console.info(
+      '%c Homie Scheduler %c ' + label,
+      'color: white; background:rgb(94, 94, 243); font-weight: 700; padding 5px;',
+      'color: rgb(94, 94, 243); background: white; font-weight: 700; padding 5px;'
+    );
+  };
 }
 
 // Shared component: schedule-helper/schedule-helper.js
@@ -1720,5 +1722,5 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-boiler-button')) {
   customElements.define('homie-scheduler-boiler-button', HomieBoilerScheduleButtonCard);
-  logCardInfo('boiler-button-card');
+  window.logCardInfo('boiler-button-card');
 }
