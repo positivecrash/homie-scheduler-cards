@@ -902,9 +902,5 @@ class HomieBoilerStatusCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-boiler-status')) {
   customElements.define('homie-scheduler-boiler-status', HomieBoilerStatusCard);
-  console.info(
-    '%c Homie Scheduler %c boiler-status-card',
-    'color: white; background:rgb(94, 94, 243); font-weight: 700; border-radius: 5px; padding 10px',
-    'color: rgb(94, 94, 243); font-weight: 700;'
-  );
+  logCardInfo('boiler-status-card');
 }

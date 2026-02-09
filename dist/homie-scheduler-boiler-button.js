@@ -1,13 +1,32 @@
 /**
  * Scheduler Boiler Button Card
- * Last build: 2026-02-06T13:15:44.179Z
+ * Last build: 2026-02-09T06:32:04.262Z
  * Version: 1.0.4
  */
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.4';
 
 // Shared Components will be auto-included by build script
 // DO NOT include ScheduleHelper, DurationSelector, or WeekdaySelector here - they will be added during build
 
 // Shared Components (auto-included from shared/)
+// Shared component: card-console-info/card-console-info.js
+/**
+ * Shared console info for Homie Scheduler cards.
+ * Logs branded card name and release version (set at build time).
+ */
+
+function logCardInfo(cardName) {
+  var version = typeof window.__HOMIE_SCHEDULER_CARDS_VERSION !== 'undefined'
+    ? window.__HOMIE_SCHEDULER_CARDS_VERSION
+    : 'dev';
+  var label = cardName + ' v' + version;
+  console.info(
+    '%c Homie Scheduler %c ' + label,
+    'color: white; background:rgb(94, 94, 243); font-weight: 700; padding 5px;',
+    'color: rgb(94, 94, 243); background: white; font-weight: 700; padding 5px;'
+  );
+}
+
 // Shared component: schedule-helper/schedule-helper.js
 /**
  * Schedule Helper Utility
@@ -1701,9 +1720,5 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-boiler-button')) {
   customElements.define('homie-scheduler-boiler-button', HomieBoilerScheduleButtonCard);
-  console.info(
-    '%c Homie Scheduler %c boiler-button-card',
-    'color: white; background:rgb(94, 94, 243); font-weight: 700; border-radius: 5px; padding 10px',
-    'color: rgb(94, 94, 243); font-weight: 700;'
-  );
+  logCardInfo('boiler-button-card');
 }

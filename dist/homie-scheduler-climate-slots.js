@@ -1,10 +1,29 @@
 /**
  * Scheduler Climate Slots Card
- * Last build: 2026-02-06T13:15:47.615Z
+ * Last build: 2026-02-09T06:32:09.079Z
  * Version: 1.0.4
  */
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.4';
 
 // Shared Components (auto-included from shared/)
+// Shared component: card-console-info/card-console-info.js
+/**
+ * Shared console info for Homie Scheduler cards.
+ * Logs branded card name and release version (set at build time).
+ */
+
+function logCardInfo(cardName) {
+  var version = typeof window.__HOMIE_SCHEDULER_CARDS_VERSION !== 'undefined'
+    ? window.__HOMIE_SCHEDULER_CARDS_VERSION
+    : 'dev';
+  var label = cardName + ' v' + version;
+  console.info(
+    '%c Homie Scheduler %c ' + label,
+    'color: white; background:rgb(94, 94, 243); font-weight: 700; padding 5px;',
+    'color: rgb(94, 94, 243); background: white; font-weight: 700; padding 5px;'
+  );
+}
+
 // Shared component: schedule-helper/schedule-helper.js
 /**
  * Schedule Helper Utility
@@ -2581,9 +2600,5 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-climate-slots')) {
   customElements.define('homie-scheduler-climate-slots', HomieClimateScheduleSlotsCard);
-  console.info(
-    '%c Homie Scheduler %c climate-slots-card',
-    'color: white; background:rgb(94, 94, 243); font-weight: 700; border-radius: 5px; padding 10px',
-    'color: rgb(94, 94, 243); font-weight: 700;'
-  );
+  logCardInfo('climate-slots-card');
 }

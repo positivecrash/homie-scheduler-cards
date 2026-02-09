@@ -1938,9 +1938,5 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-climate-slots')) {
   customElements.define('homie-scheduler-climate-slots', HomieClimateScheduleSlotsCard);
-  console.info(
-    '%c Homie Scheduler %c climate-slots-card',
-    'color: white; background:rgb(94, 94, 243); font-weight: 700; border-radius: 5px; padding 10px',
-    'color: rgb(94, 94, 243); font-weight: 700;'
-  );
+  logCardInfo('climate-slots-card');
 }

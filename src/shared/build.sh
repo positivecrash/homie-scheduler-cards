@@ -207,11 +207,13 @@ if (!releaseVersion) {
   } catch (_) {}
 }
 const lastBuild = new Date().toISOString();
+const releaseVer = releaseVersion || 'dev';
 const header = `/**
  * ${cardName}
  * Last build: ${lastBuild}
- * Version: ${releaseVersion || 'dev'}
+ * Version: ${releaseVer}
  */
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '${releaseVer}';
 
 `;
 

@@ -1,30 +1,50 @@
-# Homie Scheduler Cards
+# Easy schedule set up & auto switch off
 
-Lovelace cards for schedule management (boiler, climate).
+Lovelace cards for schedule management in Home Assistant. Set up in one click when to switch off your smart home device. Easy UI scheduler for intuitive run slots. The [Homie Scheduler](https://github.com/positivecrash/homie-scheduler-integration) integration supports all switch-like entities (switch, input_boolean, light, fan, cover) and climate. Cards are split by purpose because the UI for different devices should be different: boiler cards for water heaters and on/off appliances, climate cards for AC and thermostats (e.g. underfloor heating). More card variants are planned.
 
-## Cards description
+## Cards list
 
 - **Boiler slots** – add/edit schedule slots for boiler/switch (time, duration, weekdays)
-- **Boiler button** – one-click run for X minutes or recirculation mode (30 min)
-- **Boiler status** – icon toggle, status text, optional auto turn-off
-- **Climate slots** – schedule slots for climate entities (presets, time, weekdays)
+- **Boiler button** – one-click run for X minutes or recirculation mode
+- **Boiler status** – icon toggle, status text, latest activity info, optional auto turn-off
+- **Climate slots** – schedule slots for climate entities (presets, time, weekdays) *(testing for now)*
 
 ## Requirements
 
 - [**Homie Scheduler** integration](https://github.com/positivecrash/homie-scheduler-integration)
 - Home Assistant 2025.9 or newer
 
-## Screenshots
+## Demonstration
 
-| Boiler slots | Boiler status | Boiler button (duration) |
-|--------------|---------------|---------------------------|
-| ![Boiler slots](docs/images/homie-scheduler-boiler-slots-default.png) | ![Boiler status](docs/images/homie-scheduler-boiler-status-default.png) | ![Duration buttons](docs/images/homie-scheduler-boiler-duration-buttons-default.png) |
+You can build the dashboard you prefer with customizable separate cards. See how the Water Heater dashboard is built (for the iOS theme I also overrode some CSS variables for the cards).
 
-| All cards (boiler) | Settings |
-|--------------------|----------|
-| ![Boiler all](docs/images/homie-scheduler-boiler-all-default.png) | ![Settings](docs/images/homie-scheduler-settings.png) |
+![Boiler Homie Scheduler cards demonstration](docs/images/Homie-Scheduler-Boiler-Cards.gif)
 
-Screencast: [screencast-boiler-automation.mov](docs/images/screencast-boiler-automation.mov)
+
+## Water Heater cards features
+
+### Boiler status
+
+![Boiler status](docs/images/homie-scheduler-boiler-status.png)
+
+- Latest activity status: when and for how long the boiler was switched on
+- Max run status: if set in the integration settings, shows max run time
+- Next run status: if a schedule is set up via the slots card, shows time left until the next run
+- Customizable name
+- On/off status next to the name
+- Toggle by clicking the icon circle
+
+### Boiler schedule slots
+
+![Boiler schedule slots](docs/images/homie-scheduler-boiler-slots.png)
+
+Runs the boiler on a schedule without creating automations one by one: change times and weekdays, enable or disable slots, and set clear names—all from the card. For how the schedule is stored and enforced, see the [integration README](https://github.com/positivecrash/homie-scheduler-integration).
+
+### Boiler run button
+
+![Boiler run buttons](docs/images/homie-scheduler-boiler-buttons.png)
+
+Set fixed run durations in the card. Configure your own set of duration buttons.
 
 
 ## Installation

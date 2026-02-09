@@ -1044,9 +1044,5 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-boiler-button')) {
   customElements.define('homie-scheduler-boiler-button', HomieBoilerScheduleButtonCard);
-  console.info(
-    '%c Homie Scheduler %c boiler-button-card',
-    'color: white; background:rgb(94, 94, 243); font-weight: 700; border-radius: 5px; padding 10px',
-    'color: rgb(94, 94, 243); font-weight: 700;'
-  );
+  logCardInfo('boiler-button-card');
 }
