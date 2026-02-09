@@ -27,7 +27,7 @@ You can build the dashboard you prefer with customizable separate cards. See how
 
 ### Boiler status
 
-<p align="center"><img src="https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-status.png" alt="Boiler status" width="500"></p>
+![Boiler status](https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-status.png)
 
 - Latest activity status: when and for how long the boiler was switched on
 - Max run status: if set in the integration settings, shows max run time
@@ -39,13 +39,13 @@ You can build the dashboard you prefer with customizable separate cards. See how
 ### Boiler schedule slots
 
 
-<p align="center"><img src="https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-slots.png" alt="Boiler schedule slots" width="500"></p>
+![Boiler schedule slots](https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-slots.png)
 
 Runs the boiler on a schedule without creating automations one by one: change times and weekdays, enable or disable slots, and set clear names—all from the card. For how the schedule is stored and enforced, see the [integration README](https://github.com/positivecrash/homie-scheduler-integration).
 
 ### Boiler run button
 
-<p align="center"><img src="https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-buttons.png" alt="Boiler run buttons" width="500"></p>
+![Boiler run buttons](https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-buttons.png)
 
 Set fixed run durations in the card. Configure your own set of duration buttons.
 
