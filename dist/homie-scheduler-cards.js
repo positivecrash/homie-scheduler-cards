@@ -1845,6 +1845,7 @@ class HomieBoilerStatusCard extends HTMLElement {
     this._bridgePollCount = 0;
     this._bridgeStateOverride = null;  // Fresh bridge state from state_changed event (hass may be stale)
     this._registeredForLastRun = false;  // So integration tracks this entity for Latest activity (incl. external turn-on)
+    this._bridgeRefreshWhenShownTimer = null;  // One-time refresh of bridge when dashboard is shown (catch toggle-from-elsewhere)
   }
 
   async _loadTemplate() {
@@ -1863,6 +1864,19 @@ class HomieBoilerStatusCard extends HTMLElement {
       // Find bridge sensor on first hass set
       if (!this._bridgeSensor) {
         this._findBridgeSensor();
+      }
+
+      // When dashboard is shown, refresh bridge once so Latest activity is current (e.g. if user toggled from elsewhere)
+      if (this._bridgeSensor && this._hass?.callService) {
+        if (this._bridgeRefreshWhenShownTimer) clearTimeout(this._bridgeRefreshWhenShownTimer);
+        this._bridgeRefreshWhenShownTimer = setTimeout(() => {
+          this._bridgeRefreshWhenShownTimer = null;
+          if (this._hass) {
+            this._hass.callService('homeassistant', 'update_entity', { entity_id: this._bridgeSensor }).catch(() => {});
+            this.hass = { ...this._hass };
+            this.render().catch(() => {});
+          }
+        }, 2000);
       }
 
       // Register entity for Latest activity tracking (so external turn-on is recorded when app is closed)
@@ -1889,16 +1903,38 @@ class HomieBoilerStatusCard extends HTMLElement {
                   const newState = event.data.new_state;
                   if (entityId === this._bridgeSensor && newState) {
                     this._bridgeStateOverride = newState;
+                    this.hass = { ...this._hass };
+                    setTimeout(() => this.render().catch(() => {}), 0);
                   }
                   this._hass.callService('homeassistant', 'update_entity', {
                     entity_id: entityId
                   }).catch(() => {});
-                  this.hass = { ...this._hass };
-                  setTimeout(() => this.render().catch(() => {}), 50);
+                  if (entityId !== this._bridgeSensor) {
+                    this.hass = { ...this._hass };
+                    setTimeout(() => this.render().catch(() => {}), 50);
+                  }
                   if (entityId === this._config?.entity) {
                     setTimeout(() => this.render().catch(() => {}), 200);
                     setTimeout(() => this.render().catch(() => {}), 400);
                     this._startBridgePoll();
+                    // When entity turned OFF (from anywhere): refresh bridge so Latest activity updates (integration updates on same state_changed)
+                    const isOff = newState && String(newState.state).toLowerCase() === 'off';
+                    if (isOff && this._bridgeSensor) {
+                      const refreshBridgeAndRender = () => {
+                        if (!this._hass) return;
+                        this._hass.callService('homeassistant', 'update_entity', { entity_id: this._bridgeSensor })
+                          .then(() => {
+                            if (this._hass) {
+                              this.hass = { ...this._hass };
+                              this.render().catch(() => {});
+                            }
+                          })
+                          .catch(() => {});
+                      };
+                      [300, 800, 5000, 15000, 25000].forEach((ms) => {
+                        setTimeout(refreshBridgeAndRender, ms);
+                      });
+                    }
                   }
                   if (entityId === this._bridgeSensor) {
                     this._startBridgePoll();
@@ -2102,6 +2138,10 @@ class HomieBoilerStatusCard extends HTMLElement {
     if (this._refreshTimeout) {
       clearTimeout(this._refreshTimeout);
       this._refreshTimeout = null;
+    }
+    if (this._bridgeRefreshWhenShownTimer) {
+      clearTimeout(this._bridgeRefreshWhenShownTimer);
+      this._bridgeRefreshWhenShownTimer = null;
     }
     this._stopBridgePoll();
     

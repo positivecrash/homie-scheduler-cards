@@ -1,6 +1,6 @@
 /**
  * Scheduler Climate Slots Card
- * Last build: 2026-02-09T15:36:47.634Z
+ * Last build: 2026-02-11T19:05:39.622Z
  * Version: 1.0.5
  */
 window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.5';
