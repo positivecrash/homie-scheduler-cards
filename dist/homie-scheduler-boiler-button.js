@@ -1,9 +1,9 @@
 /**
  * Scheduler Boiler Button Card
- * Last build: 2026-02-11T19:05:33.063Z
- * Version: 1.0.5
+ * Last build: 2026-02-11T20:37:36.456Z
+ * Version: 1.0.6
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.5';
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.6';
 
 // Shared Components will be auto-included by build script
 // DO NOT include ScheduleHelper, DurationSelector, or WeekdaySelector here - they will be added during build

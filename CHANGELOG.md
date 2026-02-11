@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.6]
+
+### Status
+
+- Max run time: formatted as "1 h 40 min" instead of raw decimal (e.g. 1.666… hours)
+- Icon button: removed hover CSS (no scale/opacity on hover)
+- Latest activity: today shown as time (e.g. "22:06 for 4 min"), other days as date (e.g. "10 Feb for 4 min"); updates when bridge state changes without page refresh
+
 ## [1.0.5]
 
 ### Status

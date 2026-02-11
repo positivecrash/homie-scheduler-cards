@@ -1,9 +1,9 @@
 /**
  * Scheduler Boiler Slots Card
- * Last build: 2026-02-11T19:05:37.371Z
- * Version: 1.0.5
+ * Last build: 2026-02-11T20:37:36.599Z
+ * Version: 1.0.6
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.5';
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.6';
 
 // Shared Components (auto-included from shared/)
 // Shared component: card-console-info/card-console-info.js
