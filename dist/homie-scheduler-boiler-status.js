@@ -1,6 +1,6 @@
 /**
  * Scheduler Boiler Status Card
- * Last build: 2026-02-11T19:14:39.774Z
+ * Last build: 2026-02-11T19:47:59.014Z
  * Version: 1.0.5
  */
 window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.5';
@@ -1460,7 +1460,7 @@ class HomieBoilerStatusCard extends HTMLElement {
     }
   }
 
-  /** Last run text for current entity: "14:40 for 4 min 30 s". */
+  /** Last run text: today → "14:40 for 4 min"; other days → "10 Feb for 4 min". */
   _getLastRunText() {
     try {
       const bridgeState = this._getBridgeState();
@@ -1469,12 +1469,16 @@ class HomieBoilerStatusCard extends HTMLElement {
       const last = entityLastRuns[this._config.entity];
       if (!last || !last.started_at) return '';
       const startedAt = last.started_at;
-      let timeStr = '';
-      try {
-        const d = new Date(startedAt);
-        if (!isNaN(d.getTime())) timeStr = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-      } catch (_) {}
-      if (!timeStr) timeStr = startedAt.slice(11, 16); // HH:MM from ISO
+      const d = new Date(startedAt);
+      if (isNaN(d.getTime())) return '';
+      const now = new Date();
+      const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      let prefixStr = '';
+      if (isToday) {
+        prefixStr = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      } else {
+        prefixStr = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+      }
       const totalSec = last.duration_seconds != null ? parseInt(last.duration_seconds, 10) : null;
       let durationStr;
       if (totalSec != null && !isNaN(totalSec)) {
@@ -1487,7 +1491,7 @@ class HomieBoilerStatusCard extends HTMLElement {
         const durationMin = last.duration_minutes != null ? parseInt(last.duration_minutes, 10) : 0;
         durationStr = durationMin < 60 ? `${durationMin} min` : `${Math.floor(durationMin / 60)}h ${durationMin % 60} min`;
       }
-      return `${timeStr} for ${durationStr}`;
+      return `${prefixStr} for ${durationStr}`;
     } catch (err) {
       return '';
     }
