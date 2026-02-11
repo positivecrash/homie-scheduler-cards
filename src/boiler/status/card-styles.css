@@ -45,11 +45,6 @@
   transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
-.icon-button:hover:not(.disabled) {
-  transform: scale(1.05);
-  opacity: 0.9;
-}
-
 .icon-button:active:not(.disabled) {
   transform: scale(0.95);
 }

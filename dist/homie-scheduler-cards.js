@@ -1899,12 +1899,12 @@ class HomieBoilerStatusCard extends HTMLElement {
 
               if (event.data) {
                 if (this._hass) {
-                  // Use new_state from event directly — hass.states may not be updated yet
                   const newState = event.data.new_state;
+                  // Bridge update (e.g. Latest activity): use event payload and re-render so UI updates without refresh
                   if (entityId === this._bridgeSensor && newState) {
                     this._bridgeStateOverride = newState;
                     this.hass = { ...this._hass };
-                    setTimeout(() => this.render().catch(() => {}), 0);
+                    this.render().catch(() => {});
                   }
                   this._hass.callService('homeassistant', 'update_entity', {
                     entity_id: entityId
@@ -1913,30 +1913,7 @@ class HomieBoilerStatusCard extends HTMLElement {
                     this.hass = { ...this._hass };
                     setTimeout(() => this.render().catch(() => {}), 50);
                   }
-                  if (entityId === this._config?.entity) {
-                    setTimeout(() => this.render().catch(() => {}), 200);
-                    setTimeout(() => this.render().catch(() => {}), 400);
-                    this._startBridgePoll();
-                    // When entity turned OFF (from anywhere): refresh bridge so Latest activity updates (integration updates on same state_changed)
-                    const isOff = newState && String(newState.state).toLowerCase() === 'off';
-                    if (isOff && this._bridgeSensor) {
-                      const refreshBridgeAndRender = () => {
-                        if (!this._hass) return;
-                        this._hass.callService('homeassistant', 'update_entity', { entity_id: this._bridgeSensor })
-                          .then(() => {
-                            if (this._hass) {
-                              this.hass = { ...this._hass };
-                              this.render().catch(() => {});
-                            }
-                          })
-                          .catch(() => {});
-                      };
-                      [300, 800, 5000, 15000, 25000].forEach((ms) => {
-                        setTimeout(refreshBridgeAndRender, ms);
-                      });
-                    }
-                  }
-                  if (entityId === this._bridgeSensor) {
+                  if (entityId === this._config?.entity || entityId === this._bridgeSensor) {
                     this._startBridgePoll();
                   }
                 }
@@ -2475,8 +2452,10 @@ class HomieBoilerStatusCard extends HTMLElement {
       if (minutes == null || Number(minutes) <= 0) return '';
       const m = parseInt(minutes, 10);
       if (m < 60) return `${m} min`;
-      if (m === 60) return '1 hour';
-      return `${m / 60} hours`;
+      const h = Math.floor(m / 60);
+      const min = m % 60;
+      if (min === 0) return h === 1 ? '1 hour' : `${h} hours`;
+      return `${h} h ${min} min`;
     } catch (err) {
       return '';
     }
