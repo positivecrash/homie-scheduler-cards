@@ -10,6 +10,8 @@
  * This will create homie-schedule-slots.js with embedded styles
  */
 
+const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
+
 class HomieBoilerScheduleSlotsCard extends HTMLElement {
   constructor() {
     super();
@@ -193,7 +195,8 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       const oldItems = oldBridgeState?.attributes?.items || [];
       const oldState = oldBridgeState?.state;
       const oldNextRun = oldBridgeState?.attributes?.next_run;
-      
+      const oldSchedulerSwitchState = this._hass?.states?.[SCHEDULER_SWITCH_ENTITY]?.state;
+
       this._hass = hass;
       
       // Find bridge sensor on first hass set
@@ -209,14 +212,18 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
         return;
       }
       
-      // Subscribe to state_changed events for bridge sensor (for real-time sync between cards)
+      // Subscribe to state_changed events for bridge sensor and scheduler switch (toggle must react to switch)
       if (this._hass && this._hass.connection && !this._unsubStateChanged) {
         try {
-          // subscribeEvents returns a Promise that resolves to an unsubscribe function
           this._hass.connection.subscribeEvents(
             (event) => {
               const entityId = event?.data?.entity_id;
-              if (!entityId || entityId !== this._bridgeSensor) return;
+              if (!entityId) return;
+              if (entityId === SCHEDULER_SWITCH_ENTITY) {
+                this.hass = { ...this._hass };
+                return;
+              }
+              if (entityId !== this._bridgeSensor) return;
 
               if (event.data && this._hass) {
                 this._hass.callService('homeassistant', 'update_entity', {
@@ -293,12 +300,14 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       
       // Check if bridge sensor state changed (enabled/disabled)
       const stateChanged = oldState !== newState;
-      
+      const newSchedulerSwitchState = this._hass?.states?.[SCHEDULER_SWITCH_ENTITY]?.state;
+      const schedulerSwitchChanged = oldSchedulerSwitchState !== newSchedulerSwitchState;
+
       // Check if next_run changed
       const nextRunChanged = oldNextRun !== newNextRun;
-      
-      // Full render if: first time, no content, structure changed, state changed, or next_run changed
-      if (!wasInitialized || !this.shadowRoot.innerHTML || itemsStructureChanged || stateChanged || nextRunChanged) {
+
+      // Full render if: first time, no content, structure changed, state changed, switch toggled, or next_run changed
+      if (!wasInitialized || !this.shadowRoot.innerHTML || itemsStructureChanged || stateChanged || schedulerSwitchChanged || nextRunChanged) {
         this.render().catch(err => {});
       } else if (itemsContentChanged) {
         // Items content changed - update all slot elements to sync with other cards
@@ -465,6 +474,20 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     }
   }
 
+  /** True if the scheduler switch is on. Uses switch.homie_scheduler_enabled so the toggle stays in sync. */
+  _isSchedulerEnabled() {
+    try {
+      const state = this._hass?.states?.[SCHEDULER_SWITCH_ENTITY]?.state;
+      return state === 'on';
+    } catch (err) {
+      return true;
+    }
+  }
+
+  /** For display only: enabled only when scheduler is on AND card has enabled slots. */
+  _isEnabledForDisplay() {
+    return this._isSchedulerEnabled() && this._isEnabled();
+  }
 
   _getNextRun() {
     // Calculate next_run for THIS entity from its items (not from bridge sensor)
@@ -667,86 +690,86 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
   }
 
   async _toggleEnabled() {
-    // Check if there are any items - if not, show add popup instead
     const items = this._getItems();
     if (items.length === 0) {
-      // No items - show add popup instead of toggling
       this._openAddPopup();
       return;
     }
-    
-    // Check current state: card is enabled if at least one slot is enabled
+    // If scheduler switch is off: enable only this card's slots, then turn on the switch
+    if (!this._isSchedulerEnabled() && this._hass) {
+      const bridgeState = this._hass.states[this._bridgeSensor];
+      if (this._bridgeSensor && bridgeState?.attributes?.items) {
+        const allItems = [...bridgeState.attributes.items];
+        items.forEach(item => {
+          if (item?.id) {
+            const idx = allItems.findIndex(i => i && i.id === item.id);
+            if (idx !== -1) {
+              const updated = { ...allItems[idx], enabled: true };
+              allItems[idx] = updated;
+              this._updateSlotElement(item.id, updated);
+            }
+          }
+        });
+        this._optimisticBridgeState = { ...bridgeState, attributes: { ...bridgeState.attributes, items: allItems } };
+        this._updateHeaderStatus();
+        this.hass = { ...this._hass };
+        this._syncAllCardsForEntity(null, null, this._optimisticBridgeState);
+      }
+      for (const item of items) {
+        if (item?.id) await this._callService('update_item', { id: item.id, enabled: true });
+      }
+      if (this._bridgeSensor) {
+        try {
+          await this._hass.callService('homeassistant', 'update_entity', { entity_id: this._bridgeSensor });
+        } catch (e) {}
+      }
+      try {
+        await this._hass.callService('switch', 'turn_on', { entity_id: SCHEDULER_SWITCH_ENTITY });
+      } catch (e) {
+        console.warn('Homie Scheduler: failed to turn on scheduler switch', e);
+      }
+      setTimeout(() => { if (this._hass) this.hass = { ...this._hass }; }, 300);
+      return;
+    }
+    // Switch is on: toggle all slots for this card (on↔off)
     const hasEnabledSlots = items.some(item => item && item.enabled === true);
-    const willDisable = hasEnabledSlots;
-    const newEnabledState = !willDisable;
-    
-    // Optimistically update local data and UI for immediate feedback
+    const newEnabledState = !hasEnabledSlots;
+
     if (this._hass && this._bridgeSensor) {
       const bridgeState = this._hass.states[this._bridgeSensor];
       if (bridgeState?.attributes?.items) {
         const allItems = [...bridgeState.attributes.items];
-        
-        // Update all slots for this entity optimistically
         items.forEach(item => {
           if (item && item.id) {
-            const itemIndex = allItems.findIndex(i => i && i.id === item.id);
-            if (itemIndex !== -1) {
-              const updatedItem = { ...allItems[itemIndex], enabled: newEnabledState };
-              allItems[itemIndex] = updatedItem;
-              
-              // Update UI immediately for each slot
-              this._updateSlotElement(item.id, updatedItem);
+            const idx = allItems.findIndex(i => i && i.id === item.id);
+            if (idx !== -1) {
+              const updated = { ...allItems[idx], enabled: newEnabledState };
+              allItems[idx] = updated;
+              this._updateSlotElement(item.id, updated);
             }
           }
         });
-        
-        // Use local overlay for optimistic update (avoids mutating hass.states)
         this._optimisticBridgeState = {
           ...bridgeState,
-          attributes: {
-            ...bridgeState.attributes,
-            items: allItems
-          }
+          attributes: { ...bridgeState.attributes, items: allItems }
         };
-        
-        // Update header status immediately
         this._updateHeaderStatus();
-        
-        // Trigger hass update to sync with other cards (optimistic)
         this.hass = { ...this._hass };
-        
-        // Sync other cards with optimistic state
         this._syncAllCardsForEntity(null, null, this._optimisticBridgeState);
       }
     }
-    
-    // Then update all slots via service (server is source of truth)
+
     for (const item of items) {
-      if (item && item.id) {
-        await this._callService('update_item', {
-          id: item.id,
-          enabled: newEnabledState
-        });
+      if (item?.id) {
+        await this._callService('update_item', { id: item.id, enabled: newEnabledState });
       }
     }
-    
-    // Force update bridge sensor after toggling all slots - request entity update and sync
+
     if (this._hass && this._bridgeSensor) {
-      // Request entity update from server to get fresh state
       try {
-        await this._hass.callService('homeassistant', 'update_entity', {
-          entity_id: this._bridgeSensor
-        });
-      } catch (e) {
-      }
-      
-      // Wait a bit for state to update from server, then trigger full sync
-      setTimeout(() => {
-        if (this._hass) {
-          // Re-fetch state from server and update (this will trigger sync in all cards)
-          this.hass = { ...this._hass };
-        }
-      }, 500);
+        await this._hass.callService('homeassistant', 'update_entity', { entity_id: this._bridgeSensor });
+      } catch (e) {}
+      setTimeout(() => { if (this._hass) this.hass = { ...this._hass }; }, 500);
     }
   }
 
@@ -946,9 +969,9 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
   }
 
   _updateHeaderStatus() {
-    // Update header status without full re-render
+    // Update header status without full re-render (respect scheduler on/off)
     try {
-      const enabled = this._isEnabled();
+      const enabled = this._isEnabledForDisplay();
       let statusText = enabled ? 'On' : 'Off';
       let needsSecondsTimer = false;
       
@@ -1111,13 +1134,15 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     // Update weekday selector state
     WeekdaySelector.setSelectedWeekdays(this.shadowRoot, updatedItem.weekdays, slotCard);
 
-    // Update icon and card classes
+    // Update icon and card classes (scheduler must be on for slot to show as enabled)
+    const schedulerOn = this._isSchedulerEnabled();
+    const showEnabled = schedulerOn && updatedItem.enabled;
     const iconEl = slotCard.querySelector('.slot-icon');
     if (iconEl) {
-      iconEl.className = `slot-icon ${updatedItem.enabled ? 'enabled' : 'disabled'}`;
+      iconEl.className = `slot-icon ${showEnabled ? 'enabled' : 'disabled'}`;
     }
     
-    if (updatedItem.enabled) {
+    if (showEnabled) {
       slotCard.classList.remove('disabled');
     } else {
       slotCard.classList.add('disabled');
@@ -1280,7 +1305,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       }
 
       const items = this._getItems();
-    const enabled = this._isEnabled();
+    const enabled = this._isEnabledForDisplay();
     const title = this._config.title || 'Water Heater Scheduler';
     const enabledClass = enabled ? 'enabled' : 'disabled';
     
@@ -1359,6 +1384,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
   }
 
   async _renderItem(item) {
+    const slotEnabled = this._isSchedulerEnabled();
     const slotNumber = this._getItems().indexOf(item) + 1;
     
     // Load slot template
@@ -1403,8 +1429,8 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       .replace(/\{\{SLOT_NUMBER\}\}/g, slotNumber)
       .replace(/\{\{SLOT_NAME\}\}/g, slotName)
       .replace(/\{\{SLOT_TITLE\}\}/g, item.title || '')
-      .replace(/\{\{DISABLED_CLASS\}\}/g, item.enabled ? '' : 'disabled')
-      .replace(/\{\{ICON_CLASS\}\}/g, item.enabled ? 'enabled' : 'disabled')
+      .replace(/\{\{DISABLED_CLASS\}\}/g, (slotEnabled && item.enabled) ? '' : 'disabled')
+      .replace(/\{\{ICON_CLASS\}\}/g, (slotEnabled && item.enabled) ? 'enabled' : 'disabled')
       .replace(/\{\{SLOT_STATUS\}\}/g, slotStatus)
       .replace(/\{\{ITEM_TIME\}\}/g, item.time)
       .replace(/\{\{DURATION_MIN\}\}/g, minDuration)
