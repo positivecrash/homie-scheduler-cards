@@ -1,6 +1,6 @@
 /**
  * Scheduler Boiler Button Card
- * Last build: 2026-02-12T14:43:48.078Z
+ * Last build: 2026-02-16T05:54:48.883Z
  * Version: 1.0.6
  */
 window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.6';
@@ -27,6 +27,71 @@ if (typeof window.logCardInfo === 'undefined') {
       'color: rgb(94, 94, 243); background: white; font-weight: 700; padding 5px;'
     );
   };
+}
+
+// Shared component: entities-selector/entities-selector.js
+/**
+ * Shared: entities-selector
+ * Fills an entities list from HTML template and attaches change handlers.
+ * All HTML structure is in entities-selector.html (list container + row template).
+ *
+ * @param {Element} root - Container that has .entities-selector-list and .entities-selector-row-tpl
+ * @param {Object} options
+ * @param {string[]} options.entities - Entity IDs to show
+ * @param {string[]|Set<string>} options.checkedEntityIds - Which entities are checked
+ * @param {Object} options.hass - Home Assistant state object (for friendly_name)
+ * @param {function(string)} [options.onCheck] - Called when an entity is checked
+ * @param {function(string)} [options.onUncheck] - Called when an entity is unchecked
+ * @param {function(string): boolean} [options.isEntityDisabled] - If true, row is disabled and unchecked
+ */
+function attachEntitiesList(root, options) {
+  if (!root) return;
+  const listEl = root.querySelector('.entities-selector-list');
+  const rowTpl = root.querySelector('.entities-selector-row-tpl');
+  if (!listEl || !rowTpl || !rowTpl.content) return;
+
+  const {
+    entities = [],
+    checkedEntityIds = [],
+    hass = null,
+    onCheck = null,
+    onUncheck = null,
+    isEntityDisabled = null
+  } = options;
+
+  const checkedSet = checkedEntityIds instanceof Set
+    ? checkedEntityIds
+    : new Set(Array.isArray(checkedEntityIds) ? checkedEntityIds : []);
+
+  listEl.innerHTML = '';
+  entities.forEach(entityId => {
+    const clone = rowTpl.content.cloneNode(true);
+    const row = clone.querySelector('.entities-selector-row');
+    const input = clone.querySelector('input[name="entities-selector-entity"]');
+    const nameEl = clone.querySelector('.entities-selector-entity-name');
+    if (!input || !nameEl) return;
+
+    const name = (hass && hass.states && hass.states[entityId] && hass.states[entityId].attributes && hass.states[entityId].attributes.friendly_name) || entityId;
+    const disabled = typeof isEntityDisabled === 'function' && isEntityDisabled(entityId);
+    const checked = !disabled && checkedSet.has(entityId);
+
+    input.value = entityId;
+    input.checked = checked;
+    input.disabled = !!disabled;
+    nameEl.textContent = name;
+    if (disabled) row.classList.add('entities-selector-row-unsupported');
+
+    input.addEventListener('change', () => {
+      if (input.checked && onCheck) onCheck(entityId);
+      if (!input.checked && onUncheck) onUncheck(entityId);
+    });
+    listEl.appendChild(clone);
+  });
+}
+
+// Expose for cards (build strips export)
+if (typeof window !== 'undefined') {
+  window.EntitiesSelector = { attachEntitiesList };
 }
 
 // Shared component: schedule-helper/schedule-helper.js
@@ -809,6 +874,10 @@ if (typeof window.WeekdaySelector === 'undefined') {
 }
 
 class HomieBoilerScheduleButtonCard extends HTMLElement {
+  static getStubConfig() {
+    return { entity: '', duration: 0 };
+  }
+
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
@@ -1823,5 +1892,13 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-boiler-button')) {
   customElements.define('homie-scheduler-boiler-button', HomieBoilerScheduleButtonCard);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: 'custom:homie-scheduler-boiler-button',
+    name: 'Homie Scheduler Button',
+    description: 'Quick schedule button',
+    icon: 'https://brands.home-assistant.io/custom_integrations/homie_scheduler/icon.png',
+    preview: false
+  });
   window.logCardInfo('boiler-button-card');
 }

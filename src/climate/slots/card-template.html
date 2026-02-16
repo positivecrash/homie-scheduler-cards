@@ -101,24 +101,47 @@
           </div>
         </div>
         
-        <!-- HVAC Mode Select -->
-        <div class="popup-field">
+        <!-- Entities to apply (dropdown multi-select when card has multiple entities) -->
+        <div class="popup-field popup-entities-wrap" id="popup-entities-container" style="display: none;">
+          <label>
+            <ha-icon icon="mdi:format-list-checks"></ha-icon>
+            <span>Apply to entities</span>
+          </label>
+          <div class="popup-entities-trigger" id="popup-entities-trigger" tabindex="0" role="combobox">
+            <div class="popup-entities-chips" id="popup-entities-chips"></div>
+            <ha-icon class="popup-entities-caret" icon="mdi:chevron-down"></ha-icon>
+          </div>
+          <div class="popup-entities-dropdown" id="popup-entities-dropdown">
+            <label class="popup-entity-row popup-entity-select-all">
+              <input type="checkbox" id="popup-entities-select-all">
+              <span class="popup-entity-name">Select all</span>
+            </label>
+            <!-- SHARED:entities-selector -->
+            <!-- END:entities-selector -->
+          </div>
+        </div>
+        
+        <!-- HVAC Mode Select (full width) -->
+        <div class="popup-field popup-field-mode">
           <label>
             <ha-icon icon="mdi:thermostat"></ha-icon>
             <span>HVAC Mode</span>
           </label>
-          <select class="homie-select" id="popup-hvac-mode">
+          <select class="homie-select popup-mode-select" id="popup-hvac-mode">
             {{HVAC_MODES_OPTIONS}}
           </select>
+          <div class="popup-hvac-mode-warning" id="popup-hvac-mode-warning"></div>
         </div>
         
-        <!-- Duration Selector -->
+        <!-- Duration Selector (HA-style row: label + ha-switch) -->
         <div class="popup-field">
-          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-            <ha-icon icon="mdi:timer-outline"></ha-icon>
-            <span>Duration (minutes)</span>
-            <input type="checkbox" id="popup-duration-enabled" style="width: 18px; height: 18px; cursor: pointer;">
-          </label>
+          <div class="popup-field-row popup-duration-row">
+            <label class="popup-field-row-label">
+              <ha-icon icon="mdi:timer-outline"></ha-icon>
+              <span>Duration (minutes)</span>
+            </label>
+            <ha-switch id="popup-duration-enabled"></ha-switch>
+          </div>
           <div id="popup-duration-wrapper" style="display: none; margin-top: 8px;">
             <!-- SHARED:duration-selector -->
             <!-- END:duration-selector -->
@@ -218,6 +241,26 @@
         <select class="homie-select" data-action="update-hvac-mode" data-item-id="{{ITEM_ID}}">
           {{HVAC_MODE_OPTIONS}}
         </select>
+      </div>
+      
+      <!-- Apply to entities (when card has multiple entities) - same dropdown as in Add Slot popup -->
+      <div class="slot-entities-wrap">
+        <div class="slot-entities-label">
+          <ha-icon icon="mdi:format-list-checks"></ha-icon>
+          <span>Apply to entities</span>
+        </div>
+        <div class="slot-entities-trigger" tabindex="0" role="combobox">
+          <div class="slot-entities-chips"></div>
+          <ha-icon class="slot-entities-caret" icon="mdi:chevron-down"></ha-icon>
+        </div>
+        <div class="slot-entities-dropdown">
+          <label class="slot-entity-row slot-entity-select-all">
+            <input type="checkbox" class="slot-entities-select-all-input">
+            <span class="slot-entity-name">Select all</span>
+          </label>
+          <!-- SHARED:entities-selector -->
+          <!-- END:entities-selector -->
+        </div>
       </div>
       
       <!-- SHARED:weekday-selector -->

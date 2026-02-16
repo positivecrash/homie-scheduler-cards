@@ -13,6 +13,10 @@
 const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
 
 class HomieClimateScheduleSlotsCard extends HTMLElement {
+  static getStubConfig() {
+    return { entity: '', title: 'Schedule' };
+  }
+
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
@@ -90,18 +94,45 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       return null;
     }
     
-    // Extract slot template from main template
-    const slotMatch = template.match(/<template id="slot-item-template">([\s\S]*?)<\/template>/);
-    if (slotMatch) {
-      return slotMatch[1].trim();
+    // Extract slot template from main template. Use last </template> after open tag
+    // so nested <template> (e.g. entities-selector-row-tpl) does not truncate content (e.g. slot-delete button).
+    const openTag = '<template id="slot-item-template">';
+    const startIdx = template.indexOf(openTag);
+    if (startIdx !== -1) {
+      const contentStart = startIdx + openTag.length;
+      const closeTag = '</template>';
+      let lastClose = -1;
+      let pos = contentStart;
+      for (;;) {
+        const idx = template.indexOf(closeTag, pos);
+        if (idx === -1) break;
+        lastClose = idx;
+        pos = idx + closeTag.length;
+      }
+      if (lastClose !== -1) {
+        return template.substring(contentStart, lastClose).trim();
+      }
     }
     
     // Also try to extract from embedded-templates if template loading failed
     if (embeddedTemplates) {
       const embeddedContent = embeddedTemplates.innerHTML;
-      const embeddedSlotMatch = embeddedContent.match(/<template id="slot-item-template">([\s\S]*?)<\/template>/);
-      if (embeddedSlotMatch) {
-        return embeddedSlotMatch[1].trim();
+      const embeddedOpenTag = '<template id="slot-item-template">';
+      const embeddedStart = embeddedContent.indexOf(embeddedOpenTag);
+      if (embeddedStart !== -1) {
+        const embContentStart = embeddedStart + embeddedOpenTag.length;
+        const closeTag = '</template>';
+        let lastClose = -1;
+        let pos = embContentStart;
+        for (;;) {
+          const idx = embeddedContent.indexOf(closeTag, pos);
+          if (idx === -1) break;
+          lastClose = idx;
+          pos = idx + closeTag.length;
+        }
+        if (lastClose !== -1) {
+          return embeddedContent.substring(embContentStart, lastClose).trim();
+        }
       }
     }
     
@@ -110,12 +141,18 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
   setConfig(config) {
     try {
-      // Don't throw error - just show warning in UI
-      if (!config || !config.entity) {
-        this._config = { 
-          entity: null, 
-          title: config?.title || 'Water Heater Schedule',
-          icon: config?.icon || 'mdi:toggle-switch-variant-off'
+      if (!config) {
+        this._config = { entities: [], title: config?.title || 'Schedule', icon: config?.icon || 'mdi:toggle-switch-variant-off' };
+        return;
+      }
+      const raw = config.entity;
+      const entities = Array.isArray(raw) ? raw.filter(Boolean) : (raw ? [raw] : []);
+      if (entities.length === 0) {
+        this._config = {
+          entity: null,
+          entities: [],
+          title: config.title || 'Schedule',
+          icon: config.icon || 'mdi:toggle-switch-variant-off'
         };
         // Delay error display until shadowRoot is ready
         if (this.shadowRoot) {
@@ -126,9 +163,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         }
         return;
       }
-      // Set config with default icon if not provided
       this._config = {
         ...config,
+        entity: entities[0],
+        entities,
         icon: config.icon || 'mdi:toggle-switch-variant-off'
       };
       
@@ -237,10 +275,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
                   const pollClear = () => {
                     if (!this._optimisticBridgeState?.attributes?.items?.some(i => i?.id?.startsWith?.('temp-'))) return;
                     const fromHass = this._hass?.states?.[this._bridgeSensor]?.attributes?.items || [];
-                    const entityId = this._config?.entity;
+                    const ourEntities = new Set(this._getEntities());
                     const tempItems = (this._optimisticBridgeState?.attributes?.items || []).filter(i => i?.id?.startsWith?.('temp-'));
                     const realHasSame = tempItems.some(t => fromHass.some(h =>
-              h?.entity_id === entityId && h?.time === t?.time &&
+              ourEntities.has(h?.entity_id) && h?.time === t?.time &&
               JSON.stringify(h?.weekdays || []) === JSON.stringify(t?.weekdays || []) &&
               !String(h?.id || '').startsWith('temp-')));
                     if (realHasSame) {
@@ -285,12 +323,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       
       // Check if items content changed (for sync between cards)
       // Compare by item ID, not by index (items might be in different order)
-      // Also check if any item for THIS entity changed
-      const entityId = this._config?.entity;
+      const ourEntities = new Set(this._getEntities());
       const itemsContentChanged = !itemsStructureChanged && oldItems.some((oldItem) => {
         if (!oldItem || !oldItem.id) return false;
-        // Only check items for this entity
-        if (entityId && oldItem.entity_id !== entityId) return false;
+        if (!ourEntities.has(oldItem.entity_id)) return false;
         const newItem = newItems.find(item => item && item.id === oldItem.id);
         if (!newItem) return false;
         return oldItem.enabled !== newItem.enabled ||
@@ -327,9 +363,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
   _findBridgeSensor() {
     try {
-      if (!this._hass || !this._config || !this._config.entity) return;
+      const entities = this._getEntities();
+      if (!this._hass || !this._config || entities.length === 0) return;
 
-      const switchEntity = this._config.entity;
+      const firstEntity = entities[0];
       let firstBridgeSensor = null; // Fallback: use first bridge sensor found
     
       // Search for bridge sensor that contains this entity in entity_ids or items
@@ -352,19 +389,14 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
               firstBridgeSensor = { entityId, entryId: attrs.entry_id };
             }
             
-            // Check if this entry manages the requested entity
             const entityIds = attrs.entity_ids || [];
             const items = attrs.items || [];
-            
-            // Check if entity is in entity_ids list
-            if (entityIds.includes(switchEntity)) {
+            if (entityIds.includes(firstEntity)) {
               this._bridgeSensor = entityId;
               this._entryId = attrs.entry_id;
               return;
             }
-            
-            // Also check if any item has this entity_id (for cases where entity_ids list is not yet updated)
-            const hasEntityInItems = items.some(item => item && item.entity_id === switchEntity);
+            const hasEntityInItems = items.some(item => item && item.entity_id === firstEntity);
             if (hasEntityInItems) {
               this._bridgeSensor = entityId;
               this._entryId = attrs.entry_id;
@@ -395,22 +427,26 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
   }
 
+  _getEntities() {
+    const entities = this._config?.entities;
+    if (Array.isArray(entities) && entities.length > 0) return entities;
+    const e = this._config?.entity;
+    return e ? [e] : [];
+  }
+
   _getItems() {
     try {
-      // Safe check - if no config or entity, return empty array
-      if (!this._config || !this._config.entity) {
-        return [];
-      }
+      const entities = this._getEntities();
+      if (entities.length === 0) return [];
       
       const bridgeState = this._getBridgeState();
       const allItems = bridgeState?.attributes?.items || [];
       
-      // Filter items by entity_id from config and exclude temporary slots (created by button)
-      const entityId = this._config.entity;
+      const entitySet = new Set(entities);
       const filtered = allItems.filter(item => 
         item && 
-        item.entity_id === entityId && 
-        item.temporary !== true  // Exclude temporary slots created by button (strict check)
+        entitySet.has(item.entity_id) && 
+        item.temporary !== true
       );
       // Dedupe by (time, weekdays): when both temp and real slot exist, show only one (prefer real)
       const byKey = new Map();
@@ -437,11 +473,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
   _isEnabled() {
     try {
-      if (!this._config || !this._config.entity) {
-        return false;
-      }
-      
-      const items = this._getItems(); // Already filtered by entity_id
+      if (this._getEntities().length === 0) return false;
+      const items = this._getItems();
       
       // If no items at all, card is off
       if (!items || items.length === 0) {
@@ -631,8 +664,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       }
     }
     
-    if (!this._config || !this._config.entity) {
-      return Promise.resolve(); // Resolve silently, don't throw
+    if (!this._config || this._getEntities().length === 0) {
+      return Promise.resolve();
     }
 
     try {
@@ -759,35 +792,266 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
   }
 
+  _getPopupSelectedEntityIds() {
+    const entities = this._getEntities();
+    if (entities.length === 0) return [];
+    const container = this.shadowRoot.getElementById('popup-entities-container');
+    if (container && container.style.display !== 'none') {
+      const listEl = container.querySelector('.entities-selector-list');
+      if (listEl) {
+        const checked = listEl.querySelectorAll('input[name="entities-selector-entity"]:checked');
+        return Array.from(checked).map(el => el.value);
+      }
+    }
+    return entities;
+  }
+
+  _updateHvacModeWarning() {
+    const warningEl = this.shadowRoot.getElementById('popup-hvac-mode-warning');
+    const hvacModeSelect = this.shadowRoot.getElementById('popup-hvac-mode');
+    const container = this.shadowRoot.getElementById('popup-entities-container');
+    const listEl = container ? container.querySelector('.entities-selector-list') : null;
+    if (!warningEl || !hvacModeSelect || !this._hass) return;
+    const mode = hvacModeSelect.value;
+    if (!mode) {
+      warningEl.textContent = '';
+      if (listEl) listEl.querySelectorAll('.entities-selector-row').forEach(row => { row.classList.remove('entities-selector-row-unsupported'); const inp = row.querySelector('input'); if (inp) inp.disabled = false; });
+      return;
+    }
+    const entities = this._getEntities();
+    const unsupportedNames = [];
+    const unsupportedIds = new Set();
+    entities.forEach(entityId => {
+      const state = this._hass.states[entityId];
+      const modes = state?.attributes?.hvac_modes;
+      if (Array.isArray(modes) && !modes.includes(mode)) {
+        unsupportedIds.add(entityId);
+        const name = state?.attributes?.friendly_name || entityId;
+        unsupportedNames.push(name);
+      }
+    });
+    if (listEl) {
+      listEl.querySelectorAll('.entities-selector-row').forEach(row => {
+        const input = row.querySelector('input[name="entities-selector-entity"]');
+        if (!input) return;
+        const entityId = input.value;
+        const unsupported = unsupportedIds.has(entityId);
+        row.classList.toggle('entities-selector-row-unsupported', unsupported);
+        input.disabled = unsupported;
+        if (unsupported) input.checked = false;
+      });
+    }
+    if (unsupportedNames.length === 0) {
+      warningEl.textContent = '';
+    } else {
+      warningEl.textContent = unsupportedNames.length === 1
+        ? `This mode is not supported for: ${unsupportedNames[0]}`
+        : `This mode is not supported for: ${unsupportedNames.join(', ')}`;
+    }
+    this._updateEntitiesChips();
+    const selectAll = this.shadowRoot.getElementById('popup-entities-select-all');
+    if (listEl && selectAll) {
+      const all = listEl.querySelectorAll('.entities-selector-row:not(.entities-selector-row-unsupported) input[name="entities-selector-entity"]');
+      const checkedCount = Array.from(all).filter(inp => inp.checked).length;
+      selectAll.checked = checkedCount === all.length;
+      selectAll.indeterminate = checkedCount > 0 && checkedCount < all.length;
+    }
+  }
+
+  _updateEntitiesChips() {
+    const chipsEl = this.shadowRoot.getElementById('popup-entities-chips');
+    if (!chipsEl) return;
+    const container = this.shadowRoot.getElementById('popup-entities-container');
+    const listEl = container ? container.querySelector('.entities-selector-list') : null;
+    if (!listEl) return;
+    const checked = listEl.querySelectorAll('input[name="entities-selector-entity"]:checked');
+    const names = Array.from(checked).map(input => {
+      const row = input.closest('.entities-selector-row');
+      const nameEl = row && row.querySelector('.entities-selector-entity-name');
+      return nameEl ? nameEl.textContent : input.value;
+    });
+    chipsEl.innerHTML = '';
+    names.forEach(name => {
+      const chip = document.createElement('span');
+      chip.className = 'popup-entity-chip';
+      chip.textContent = name;
+      chipsEl.appendChild(chip);
+    });
+  }
+
+  _updateSlotEntitiesChips(slotEntitiesWrap) {
+    if (!slotEntitiesWrap) return;
+    const chipsEl = slotEntitiesWrap.querySelector('.slot-entities-chips');
+    const listEl = slotEntitiesWrap.querySelector('.entities-selector-list');
+    if (!chipsEl || !listEl) return;
+    const checked = listEl.querySelectorAll('input[name="entities-selector-entity"]:checked');
+    const names = Array.from(checked).map(input => {
+      const row = input.closest('.entities-selector-row');
+      const nameEl = row && row.querySelector('.entities-selector-entity-name');
+      return nameEl ? nameEl.textContent : input.value;
+    });
+    chipsEl.innerHTML = '';
+    names.forEach(name => {
+      const chip = document.createElement('span');
+      chip.className = 'popup-entity-chip';
+      chip.textContent = name;
+      chipsEl.appendChild(chip);
+    });
+    this._updateSlotTitleFromEntities(slotEntitiesWrap, names);
+  }
+
+  /** Update slot header name and remove button text to match current entity selection. */
+  _updateSlotTitleFromEntities(slotEntitiesWrap, entityNames) {
+    if (!slotEntitiesWrap) return;
+    const slotCard = slotEntitiesWrap.closest('.slot-card');
+    if (!slotCard) return;
+    const slotCards = this.shadowRoot.querySelectorAll('.slot-card');
+    const slotNumber = slotCards.length ? Array.from(slotCards).indexOf(slotCard) + 1 : 1;
+    const entityLabel = (entityNames && entityNames.length > 0) ? entityNames.join(', ') : '';
+    const slotName = `Slot ${slotNumber}` + (entityLabel ? ` (${entityLabel})` : '');
+    const nameEl = slotCard.querySelector('.slot-name');
+    if (nameEl) nameEl.textContent = slotName;
+    const removeSpan = slotCard.querySelector('.slot-delete span');
+    if (removeSpan) removeSpan.textContent = 'Remove ' + slotName;
+  }
+
+  _updateSlotEntitiesForMode(slotEntitiesWrap, itemEl) {
+    if (!slotEntitiesWrap || !this._hass) return;
+    const listEl = slotEntitiesWrap.querySelector('.entities-selector-list');
+    const hvacSelect = itemEl.querySelector('[data-action="update-hvac-mode"]');
+    const mode = hvacSelect && hvacSelect.value ? hvacSelect.value : null;
+    if (!listEl || !mode) return;
+    listEl.querySelectorAll('.entities-selector-row').forEach(row => {
+      const input = row.querySelector('input[name="entities-selector-entity"]');
+      if (!input) return;
+      const entityId = input.value;
+      const state = this._hass.states[entityId];
+      const modes = state?.attributes?.hvac_modes;
+      const unsupported = Array.isArray(modes) && !modes.includes(mode);
+      row.classList.toggle('entities-selector-row-unsupported', unsupported);
+      input.disabled = !!unsupported;
+      if (unsupported) input.checked = false;
+    });
+    this._updateSlotEntitiesChips(slotEntitiesWrap);
+    const selectAllInput = slotEntitiesWrap.querySelector('.slot-entities-select-all-input');
+    if (selectAllInput && listEl) {
+      const all = listEl.querySelectorAll('input[name="entities-selector-entity"]:not(:disabled)');
+      const checkedCount = Array.from(all).filter(inp => inp.checked).length;
+      selectAllInput.checked = all.length > 0 && checkedCount === all.length;
+      selectAllInput.indeterminate = checkedCount > 0 && checkedCount < all.length;
+    }
+  }
+
+  _entitiesDropdownCloseOnOutside(e) {
+    const container = this.shadowRoot.getElementById('popup-entities-container');
+    const dropdown = this.shadowRoot.getElementById('popup-entities-dropdown');
+    const trigger = this.shadowRoot.getElementById('popup-entities-trigger');
+    if (!container || !dropdown || !trigger) return;
+    if (container.contains(e.target)) return;
+    dropdown.classList.remove('open');
+    trigger.classList.remove('open');
+    document.removeEventListener('click', this._boundEntitiesCloseOnOutside);
+  }
+
+  _attachEntitiesDropdownListeners() {
+    const trigger = this.shadowRoot.getElementById('popup-entities-trigger');
+    const dropdown = this.shadowRoot.getElementById('popup-entities-dropdown');
+    const selectAll = this.shadowRoot.getElementById('popup-entities-select-all');
+    const listEl = dropdown ? dropdown.querySelector('.entities-selector-list') : null;
+    if (!trigger || !dropdown) return;
+
+    trigger.onclick = () => {
+      const isOpen = dropdown.classList.toggle('open');
+      trigger.classList.toggle('open', isOpen);
+      if (isOpen) {
+        this._updateEntitiesChips();
+        this._boundEntitiesCloseOnOutside = this._entitiesDropdownCloseOnOutside.bind(this);
+        setTimeout(() => document.addEventListener('click', this._boundEntitiesCloseOnOutside), 0);
+      } else {
+        document.removeEventListener('click', this._boundEntitiesCloseOnOutside);
+      }
+    };
+
+    if (selectAll && listEl) {
+      selectAll.closest('label').onclick = (e) => e.stopPropagation();
+      selectAll.onchange = () => {
+        const checked = selectAll.checked;
+        listEl.querySelectorAll('.entities-selector-row input[name="entities-selector-entity"]:not([disabled])').forEach(inp => { inp.checked = checked; });
+        this._updateEntitiesChips();
+      };
+    }
+    if (listEl) {
+      listEl.querySelectorAll('input[name="entities-selector-entity"]').forEach(input => {
+        input.addEventListener('change', () => {
+          const all = listEl.querySelectorAll('.entities-selector-row input[name="entities-selector-entity"]');
+          const checkedCount = Array.from(all).filter(inp => inp.checked).length;
+          if (selectAll) {
+            selectAll.checked = checkedCount === all.length;
+            selectAll.indeterminate = checkedCount > 0 && checkedCount < all.length;
+          }
+          this._updateEntitiesChips();
+          this._updateHvacModeWarning();
+        });
+      });
+    }
+  }
+
   _openAddPopup() {
     const popup = this.shadowRoot.getElementById('add-popup');
     if (popup) {
       popup.style.display = 'flex';
-      // Reset form
       const hoursSelect = this.shadowRoot.getElementById('popup-time-hours');
       const minutesSelect = this.shadowRoot.getElementById('popup-time-minutes');
       const hvacModeSelect = this.shadowRoot.getElementById('popup-hvac-mode');
       const durationEnabledCheckbox = this.shadowRoot.getElementById('popup-duration-enabled');
       const durationWrapper = this.shadowRoot.getElementById('popup-duration-wrapper');
+      const entitiesContainer = this.shadowRoot.getElementById('popup-entities-container');
+      const entitiesList = this.shadowRoot.getElementById('popup-entities');
       const now = new Date();
       const hour = String(now.getHours()).padStart(2, '0');
       const minute = String(Math.round(now.getMinutes() / 5) * 5).padStart(2, '0');
       if (hoursSelect) hoursSelect.value = hour;
       if (minutesSelect) minutesSelect.value = minute;
-      
-      // Reset duration checkbox and hide duration selector
-      if (durationEnabledCheckbox) {
-        durationEnabledCheckbox.checked = false;
+      if (durationEnabledCheckbox) durationEnabledCheckbox.checked = false;
+      if (durationWrapper) durationWrapper.style.display = 'none';
+      DurationSelector.reset(this.shadowRoot, null);
+
+      const entities = this._getEntities();
+      const dropdown = this.shadowRoot.getElementById('popup-entities-dropdown');
+      if (dropdown && entities.length > 1) {
+        entitiesContainer.style.display = '';
+        const trigger = this.shadowRoot.getElementById('popup-entities-trigger');
+        if (trigger) trigger.classList.remove('open');
+        dropdown.classList.remove('open');
+        const selectAllInput = this.shadowRoot.getElementById('popup-entities-select-all');
+        if (selectAllInput) { selectAllInput.checked = true; selectAllInput.indeterminate = false; }
+        const hvacModeSelect = this.shadowRoot.getElementById('popup-hvac-mode');
+        const isEntityDisabled = (entityId) => {
+          if (!hvacModeSelect || !hvacModeSelect.value || !this._hass) return false;
+          const state = this._hass.states[entityId];
+          const modes = state?.attributes?.hvac_modes;
+          return Array.isArray(modes) && !modes.includes(hvacModeSelect.value);
+        };
+        if (window.EntitiesSelector && window.EntitiesSelector.attachEntitiesList) {
+          window.EntitiesSelector.attachEntitiesList(dropdown, {
+            entities,
+            checkedEntityIds: entities,
+            hass: this._hass,
+            onCheck: () => { this._updateEntitiesChips(); this._updateHvacModeWarning(); },
+            onUncheck: () => { this._updateEntitiesChips(); this._updateHvacModeWarning(); },
+            isEntityDisabled
+          });
+        }
+        this._updateEntitiesChips();
+        this._updateHvacModeWarning();
+        this._attachEntitiesDropdownListeners();
+      } else if (entitiesContainer) {
+        entitiesContainer.style.display = 'none';
       }
-      if (durationWrapper) {
-        durationWrapper.style.display = 'none';
-      }
-      DurationSelector.reset(this.shadowRoot, null); // No duration by default for climate
-      
-      // Load HVAC modes from entity
-      if (hvacModeSelect && this._config && this._config.entity && this._hass) {
+
+      if (hvacModeSelect && this._config?.entity && this._hass) {
         const entityState = this._hass.states[this._config.entity];
-        if (entityState && entityState.attributes && entityState.attributes.hvac_modes) {
+        if (entityState?.attributes?.hvac_modes) {
           const hvacModes = entityState.attributes.hvac_modes.filter(mode => mode !== 'off');
           hvacModeSelect.innerHTML = '';
           hvacModes.forEach(mode => {
@@ -796,12 +1060,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
             option.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
             hvacModeSelect.appendChild(option);
           });
-          // Set default to first mode (usually 'heat' or 'cool')
-          if (hvacModes.length > 0) {
-            hvacModeSelect.value = hvacModes[0];
-          }
+          if (hvacModes.length > 0) hvacModeSelect.value = hvacModes[0];
         }
       }
+      this._updateHvacModeWarning();
     }
   }
 
@@ -809,6 +1071,14 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     const popup = this.shadowRoot.getElementById('add-popup');
     if (popup) {
       popup.style.display = 'none';
+    }
+    const trigger = this.shadowRoot.getElementById('popup-entities-trigger');
+    const dropdown = this.shadowRoot.getElementById('popup-entities-dropdown');
+    if (trigger) trigger.classList.remove('open');
+    if (dropdown) dropdown.classList.remove('open');
+    if (this._boundEntitiesCloseOnOutside) {
+      document.removeEventListener('click', this._boundEntitiesCloseOnOutside);
+      this._boundEntitiesCloseOnOutside = null;
     }
   }
 
@@ -843,56 +1113,64 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     const hvacMode = hvacModeSelect.value;
     const title = titleInput?.value?.trim() || null;
 
-    if (!this._config || !this._config.entity) {
+    const entities = this._getEntities();
+    if (!this._config || entities.length === 0) return;
+
+    const selectedEntityIds = this._getPopupSelectedEntityIds();
+    if (selectedEntityIds.length === 0) {
+      alert('Select at least one entity for this slot.');
       return;
     }
-    
-    // Use shared helper to add slot (EXACTLY as in boiler slots card)
-    const climateServices = ScheduleHelper.createClimateServices(this._config.entity, hvacMode);
-    const durationValue = duration && duration !== '' ? parseInt(duration) : null;
-    
-    try {
-      await ScheduleHelper.addScheduleSlot({
-        hass: this._hass,
-        callService: async (service, data) => {
-          return await this._callService(service, data);
-        },
-        getBridgeState: () => this._getBridgeState(),
-        entity_id: this._config.entity,
-        time: time,
-        duration: durationValue,
-        weekdays: selectedDays,
-        title: title,
-        service_start: climateServices.service_start,
-        service_end: durationValue ? climateServices.service_end : null,
-        bridgeSensor: this._bridgeSensor,
-        onRender: () => {
-          // Use current hass (updated by WebSocket), not stale hass from closure
-          this.hass = { ...this._hass };
-          this.render().catch(() => {});
-        }
-      });
 
-      // Optimistic UI: show new slot immediately, clear when real appears (poll, don't force-clear)
+    const durationValue = duration && duration !== '' ? parseInt(duration) : null;
+    const climateServicesByEntity = {};
+    selectedEntityIds.forEach(eid => {
+      climateServicesByEntity[eid] = ScheduleHelper.createClimateServices(eid, hvacMode);
+    });
+
+    try {
+      for (const entity_id of selectedEntityIds) {
+        const climateServices = climateServicesByEntity[entity_id];
+        await ScheduleHelper.addScheduleSlot({
+          hass: this._hass,
+          callService: async (service, data) => this._callService(service, data),
+          getBridgeState: () => this._getBridgeState(),
+          entity_id,
+          time,
+          duration: durationValue,
+          weekdays: selectedDays,
+          title,
+          service_start: climateServices.service_start,
+          service_end: durationValue ? climateServices.service_end : null,
+          bridgeSensor: this._bridgeSensor,
+          onRender: () => {
+            this.hass = { ...this._hass };
+            this.render().catch(() => {});
+          }
+        });
+      }
+
       const bridgeState = this._getBridgeState();
       if (bridgeState && bridgeState.attributes) {
         const currentItems = bridgeState.attributes.items || [];
-        const alreadyHasSlot = currentItems.some(
-          (i) => i && i.entity_id === this._config.entity && i.time === time
+        const alreadyAll = selectedEntityIds.every(eid =>
+          currentItems.some(i => i && i.entity_id === eid && i.time === time)
         );
-        if (!alreadyHasSlot) {
-          const newItem = {
-            id: 'temp-' + Date.now(),
-            entity_id: this._config.entity,
-            time,
-            duration: durationValue,
-            weekdays: selectedDays,
-            enabled: true,
-            service_start: climateServices.service_start,
-            service_end: durationValue ? climateServices.service_end : null
-          };
-          if (title) newItem.title = title;
-          const newItems = [...currentItems, newItem];
+        if (!alreadyAll) {
+          const newItems = [...currentItems];
+          selectedEntityIds.forEach((eid, idx) => {
+            newItems.push({
+              id: 'temp-' + Date.now() + '-' + idx,
+              entity_id: eid,
+              time,
+              duration: durationValue,
+              weekdays: selectedDays,
+              enabled: true,
+              service_start: climateServicesByEntity[eid].service_start,
+              service_end: durationValue ? climateServicesByEntity[eid].service_end : null,
+              ...(title ? { title } : {})
+            });
+          });
           this._optimisticBridgeState = {
             ...bridgeState,
             attributes: { ...bridgeState.attributes, items: newItems }
@@ -904,10 +1182,9 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           const pollClear = () => {
             if (!this._optimisticBridgeState?.attributes?.items?.some(i => i?.id?.startsWith?.('temp-'))) return;
             const fromHass = this._hass?.states?.[this._bridgeSensor]?.attributes?.items || [];
-            const entityId = this._config?.entity;
             const tempItems = (this._optimisticBridgeState?.attributes?.items || []).filter(i => i?.id?.startsWith?.('temp-'));
-            const realHasSame = tempItems.some(t => fromHass.some(h =>
-              h?.entity_id === entityId && h?.time === t?.time &&
+            const realHasSame = tempItems.every(t => fromHass.some(h =>
+              h?.entity_id === t?.entity_id && h?.time === t?.time &&
               JSON.stringify(h?.weekdays || []) === JSON.stringify(t?.weekdays || []) &&
               !String(h?.id || '').startsWith('temp-')));
             if (realHasSame) {
@@ -1024,16 +1301,16 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
   }
   
   _syncAllCardsForEntity(itemId = null, updatedItem = null, optimisticBridgeState = null) {
-    if (!window._homieScheduleCards || !this._hass || !this._config?.entity) {
-      return;
-    }
-    
-    const currentEntity = this._config.entity;
+    if (!window._homieScheduleCards || !this._hass || this._getEntities().length === 0) return;
+    const ourEntities = new Set(this._getEntities());
     
     window._homieScheduleCards.forEach(card => {
       if (card === this) return;
-      
-      if (card._config?.entity === currentEntity && card._hass) {
+      const cardEntities = new Set(card._getEntities?.() || []);
+      const shouldSync = optimisticBridgeState
+        ? ourEntities.size > 0 && [...ourEntities].some(e => cardEntities.has(e))
+        : (updatedItem && cardEntities.has(updatedItem.entity_id)) || (!updatedItem && [...ourEntities].some(e => cardEntities.has(e)));
+      if (!shouldSync || !card._hass) return;
         if (optimisticBridgeState) {
           card._optimisticBridgeState = optimisticBridgeState;
         }
@@ -1051,7 +1328,6 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         }
         
         card.hass = { ...card._hass };
-      }
     });
   }
 
@@ -1137,53 +1413,73 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }, 0);
   }
 
+  /** All item IDs in the same slot (same time + weekdays) for our entities. Used so time/duration/weekdays change applies to all entities in the slot. */
+  _getSameSlotItemIds(bridgeState, itemId) {
+    const allItems = bridgeState?.attributes?.items || [];
+    const item = allItems.find(i => i && i.id === itemId);
+    if (!item) return [itemId];
+    const entitySet = new Set(this._getEntities());
+    const sameSlot = allItems.filter(i =>
+      i && i.temporary !== true && entitySet.has(i.entity_id) &&
+      i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
+    );
+    return sameSlot.map(i => i.id).filter(Boolean);
+  }
+
   async _updateItem(itemId, updates) {
+    const bridgeState = this._getBridgeState();
+    const isSlotWideUpdate = bridgeState && (updates.time !== undefined || updates.duration !== undefined || updates.weekdays !== undefined);
+    const itemIdsToUpdate = isSlotWideUpdate && bridgeState ? this._getSameSlotItemIds(bridgeState, itemId) : [itemId];
+
     // Optimistically update (using overlay, no hass mutation)
-    if (this._hass && this._bridgeSensor) {
-      const bridgeState = this._getBridgeState();
-      if (bridgeState?.attributes?.items) {
-        const items = [...bridgeState.attributes.items];
-        const itemIndex = items.findIndex(item => item && item.id === itemId);
-        if (itemIndex !== -1) {
-          const currentItem = items[itemIndex];
-          const updatedItem = { ...currentItem };
-          
-          if (updates.service_start) {
-            updatedItem.service_start = updates.service_start;
-          }
-          if (updates.service_end !== undefined) {
-            if (updates.service_end === null) {
-              delete updatedItem.service_end;
-            } else {
-              updatedItem.service_end = updates.service_end;
-            }
-          }
-          Object.keys(updates).forEach(key => {
-            if (key !== 'service_start' && key !== 'service_end') {
-              updatedItem[key] = updates[key];
-            }
-          });
-          
-          items[itemIndex] = updatedItem;
-          
-          this._optimisticBridgeState = {
-            ...bridgeState,
-            attributes: {
-              ...bridgeState.attributes,
-              items: items
-            }
-          };
-          
-          this._updateSlotElement(itemId, updatedItem);
-          this._updateHeaderStatus();
-          this.hass = { ...this._hass };
-          this._syncAllCardsForEntity(itemId, updatedItem, this._optimisticBridgeState);
+    if (this._hass && this._bridgeSensor && bridgeState?.attributes?.items) {
+      const items = [...bridgeState.attributes.items];
+      let anyUpdated = false;
+      for (const id of itemIdsToUpdate) {
+        const itemIndex = items.findIndex(item => item && item.id === id);
+        if (itemIndex === -1) continue;
+        const currentItem = items[itemIndex];
+        const updatedItem = { ...currentItem };
+        if (updates.service_start) {
+          updatedItem.service_start = updates.service_start;
         }
+        if (updates.service_end !== undefined) {
+          if (updates.service_end === null) {
+            delete updatedItem.service_end;
+          } else {
+            updatedItem.service_end = updates.service_end;
+          }
+        }
+        Object.keys(updates).forEach(key => {
+          if (key !== 'service_start' && key !== 'service_end') {
+            updatedItem[key] = updates[key];
+          }
+        });
+        items[itemIndex] = updatedItem;
+        anyUpdated = true;
+      }
+      if (anyUpdated) {
+        this._optimisticBridgeState = {
+          ...bridgeState,
+          attributes: {
+            ...bridgeState.attributes,
+            items: items
+          }
+        };
+        const firstUpdated = items.find(i => i && itemIdsToUpdate.includes(i.id));
+        if (firstUpdated) {
+          this._updateSlotElement(itemId, firstUpdated);
+        }
+        this._updateHeaderStatus();
+        this.hass = { ...this._hass };
+        this._syncAllCardsForEntity(itemId, firstUpdated || bridgeState.attributes.items.find(i => i && i.id === itemId), this._optimisticBridgeState);
       }
     }
-    
-    const serviceData = { id: itemId, ...updates };
-    await this._callService('update_item', serviceData);
+
+    for (const id of itemIdsToUpdate) {
+      const serviceData = { id, ...updates };
+      await this._callService('update_item', serviceData);
+    }
     
     if (this._hass && this._bridgeSensor) {
       try {
@@ -1211,7 +1507,6 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
   }
 
   async _deleteItem(itemId) {
-    if (!confirm('Delete this schedule item?')) return;
     await this._callService('delete_item', { id: itemId });
     
     // Force update after deleting item - request entity update and re-render
@@ -1274,8 +1569,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
   async render() {
     try {
-      // Always check config first - even before hass
-      if (!this._config || !this._config.entity) {
+      if (!this._config || this._getEntities().length === 0) {
         const errorMsg = this._configError || 'Please configure entity in card settings';
         if (this.shadowRoot) {
           this._showError(errorMsg);
@@ -1367,10 +1661,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       .replace(/\{\{DURATION_VALUE\}\}/g, defaultDuration)
       .replace(/\{\{ITEM_ID\}\}/g, ''); // Empty for popup
     
-    // Get entity name for popup header
-    const entityName = this._config?.entity || 'entity';
-    const entityState = this._hass?.states?.[entityName];
-    const entityDisplayName = entityState?.attributes?.friendly_name || entityName;
+    const entities = this._getEntities();
+    const entityDisplayName = entities.length > 1
+      ? (this._config?.title || `${entities.length} entities`)
+      : (this._hass?.states?.[entities[0]]?.attributes?.friendly_name || entities[0] || 'entity');
     
     // Replace placeholders (icon is now fixed in template)
     const htmlContent = processedTemplate
@@ -1410,8 +1704,20 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       return '';
     }
     
-    // Format slot name - use title if available, otherwise "Slot N"
-    const slotName = item.title || `Slot ${slotNumber}`;
+    const entities = this._getEntities();
+    const bridgeState = this._getBridgeState();
+    const allItems = bridgeState?.attributes?.items || [];
+    const entitySet = new Set(entities);
+    const sameSlotItems = entities.length > 1 ? allItems.filter(i =>
+      i && i.temporary !== true && entitySet.has(i.entity_id) &&
+      i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
+    ) : [];
+    let entityLabel = '';
+    if (entities.length > 1) {
+      const names = sameSlotItems.map(i => this._hass?.states?.[i.entity_id]?.attributes?.friendly_name || i.entity_id);
+      entityLabel = names.length > 0 ? names.join(', ') : (this._hass?.states?.[item.entity_id]?.attributes?.friendly_name || item.entity_id);
+    }
+    const slotName = item.title || `Slot ${slotNumber}` + (entityLabel ? ` (${entityLabel})` : '');
     
     // Format slot status
     const daysText = WeekdaySelector.formatWeekdays(item.weekdays);
@@ -1424,12 +1730,15 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       statusPrefix = item.enabled ? currentHvacMode.charAt(0).toUpperCase() + currentHvacMode.slice(1) : 'Off';
     }
     
-    // Get HVAC modes from entity for dropdown
+    const entityForMode = item.entity_id || this._config?.entity;
     let hvacModeOptions = '';
-    if (this._config && this._config.entity && this._hass) {
-      const entityState = this._hass.states[this._config.entity];
+    if (this._config && entityForMode && this._hass) {
+      const entityState = this._hass.states[entityForMode];
       if (entityState && entityState.attributes && entityState.attributes.hvac_modes) {
-        const hvacModes = entityState.attributes.hvac_modes.filter(mode => mode !== 'off');
+        let hvacModes = entityState.attributes.hvac_modes.filter(mode => mode !== 'off');
+        if (currentHvacMode && !hvacModes.includes(currentHvacMode)) {
+          hvacModes = [currentHvacMode, ...hvacModes];
+        }
         hvacModeOptions = hvacModes.map(mode => {
           const selected = currentHvacMode === mode ? 'selected' : '';
           const label = mode.charAt(0).toUpperCase() + mode.slice(1);
@@ -1439,7 +1748,6 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
     if (!hvacModeOptions) {
       // Fallback if entity not found or no modes available
-      // Make sure to select the correct mode even in fallback
       const heatSelected = currentHvacMode === 'heat' ? 'selected' : '';
       const coolSelected = currentHvacMode === 'cool' ? 'selected' : '';
       hvacModeOptions = `<option value="heat" ${heatSelected}>Heat</option><option value="cool" ${coolSelected}>Cool</option>`;
@@ -1570,14 +1878,14 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     // Popup duration selection - attach listeners only when wrapper is visible
     // (will be attached when checkbox is checked)
     
-    // Duration enabled checkbox - show/hide duration selector
+    // Duration enabled (ha-switch) - show/hide duration selector
     const durationEnabledCheckbox = this.shadowRoot.getElementById('popup-duration-enabled');
     const durationWrapper = this.shadowRoot.getElementById('popup-duration-wrapper');
+    const durationRow = this.shadowRoot.querySelector('.popup-duration-row');
     if (durationEnabledCheckbox && durationWrapper) {
-      durationEnabledCheckbox.addEventListener('change', (e) => {
-        if (e.target.checked) {
+      const syncDurationWrapper = () => {
+        if (durationEnabledCheckbox.checked) {
           durationWrapper.style.display = 'block';
-          // Allowed values: 5, 10, 15, ... up to max, plus max if not multiple of 5
           const durationInput = durationWrapper.querySelector('[data-action="update-duration"]');
           const durationSlider = durationWrapper.querySelector('[data-action="update-duration-slider"]');
           const minDuration = this._config.min_duration || 15;
@@ -1602,7 +1910,21 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           durationWrapper.style.display = 'none';
           DurationSelector.reset(durationWrapper, null);
         }
-      });
+      };
+      durationEnabledCheckbox.addEventListener('change', () => syncDurationWrapper());
+      if (durationRow) {
+        durationRow.addEventListener('click', (e) => {
+          if (e.target.closest('ha-switch')) return;
+          e.preventDefault();
+          durationEnabledCheckbox.checked = !durationEnabledCheckbox.checked;
+          durationEnabledCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      }
+    }
+
+    const hvacModeSelect = this.shadowRoot.getElementById('popup-hvac-mode');
+    if (hvacModeSelect) {
+      hvacModeSelect.addEventListener('change', () => this._updateHvacModeWarning());
     }
     
     // Ensure Everyday is active after attaching listeners (in case popup is already open)
@@ -1760,7 +2082,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           const serviceStart = {
             name: 'climate.set_hvac_mode',
             value: {
-              entity_id: this._config.entity,
+              entity_id: currentItem.entity_id,
               hvac_mode: newHvacMode
             }
           };
@@ -1773,6 +2095,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           }
           
           this._updateItem(itemId, updates);
+          const wrap = itemEl.querySelector('.slot-entities-wrap');
+          if (wrap) this._updateSlotEntitiesForMode(wrap, itemEl);
         };
         // Clone node to remove all event listeners
         const newHvacModeSelect = hvacModeSelect.cloneNode(true);
@@ -1781,6 +2105,117 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         newHvacModeSelect.addEventListener('click', (e) => {
           e.stopPropagation();
         });
+      }
+
+      const slotEntitiesWrap = itemEl.querySelector('.slot-entities-wrap');
+      if (slotEntitiesWrap) {
+        const entities = this._getEntities();
+        if (entities.length <= 1) {
+          slotEntitiesWrap.style.display = 'none';
+        } else {
+          slotEntitiesWrap.style.display = '';
+        }
+        if (window.EntitiesSelector && window.EntitiesSelector.attachEntitiesList && entities.length > 1) {
+          const bridgeState = this._getBridgeState();
+          const allItems = bridgeState?.attributes?.items || [];
+          const entitySet = new Set(entities);
+          const sameSlotItems = allItems.filter(i =>
+            i && i.temporary !== true && entitySet.has(i.entity_id) &&
+            i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
+          );
+          const entityIdsToItemIds = {};
+          sameSlotItems.forEach(i => { entityIdsToItemIds[i.entity_id] = i.id; });
+          slotEntitiesWrap.dataset.slotEntityIds = JSON.stringify(entityIdsToItemIds);
+          const slotHvacSelect = itemEl.querySelector('[data-action="update-hvac-mode"]');
+          const isEntityDisabled = (entityId) => {
+            if (!slotHvacSelect || !slotHvacSelect.value || !this._hass) return false;
+            const state = this._hass.states[entityId];
+            const modes = state?.attributes?.hvac_modes;
+            return Array.isArray(modes) && !modes.includes(slotHvacSelect.value);
+          };
+          window.EntitiesSelector.attachEntitiesList(slotEntitiesWrap, {
+            entities,
+            checkedEntityIds: sameSlotItems.map(i => i.entity_id),
+            hass: this._hass,
+            isEntityDisabled,
+            onCheck: async (entityId) => {
+              const timeHours = itemEl.querySelector('[data-action="update-time-hours"]');
+              const timeMinutes = itemEl.querySelector('[data-action="update-time-minutes"]');
+              const time = (timeHours && timeMinutes) ? `${timeHours.value}:${timeMinutes.value}` : item.time;
+              const selectedWeekdays = WeekdaySelector.getSelectedWeekdays(itemEl);
+              const weekdays = selectedWeekdays.length > 0 ? selectedWeekdays : item.weekdays;
+              const hvacSelect = itemEl.querySelector('[data-action="update-hvac-mode"]');
+              const hvacMode = hvacSelect && hvacSelect.value ? hvacSelect.value : (item.service_start?.value?.hvac_mode || 'heat');
+              let duration = null;
+              if (window.DurationSelector) {
+                const wrapper = itemEl.querySelector('.duration-selector-wrapper');
+                if (wrapper) duration = DurationSelector.getSelectedDuration(itemEl);
+              }
+              const service_start = ScheduleHelper.createClimateServices(entityId, hvacMode).service_start;
+              const service_end = duration ? ScheduleHelper.createClimateServices(entityId, hvacMode).service_end : null;
+              await ScheduleHelper.addScheduleSlot({
+                hass: this._hass,
+                callService: async (service, data) => this._callService(service, data),
+                getBridgeState: () => this._getBridgeState(),
+                entity_id: entityId,
+                time,
+                duration: duration || undefined,
+                weekdays,
+                service_start,
+                service_end,
+                bridgeSensor: this._bridgeSensor,
+                onRender: () => { this.hass = { ...this._hass }; this.render().catch(() => {}); }
+              });
+              this._optimisticBridgeState = null;
+              this.hass = { ...this._hass };
+              await this.render();
+            },
+            onUncheck: async (entityId) => {
+              const ids = JSON.parse(slotEntitiesWrap.dataset.slotEntityIds || '{}');
+              const itemIdToDelete = ids[entityId];
+              if (itemIdToDelete) await this._deleteItem(itemIdToDelete);
+            }
+          });
+          this._updateSlotEntitiesChips(slotEntitiesWrap);
+          const trigger = slotEntitiesWrap.querySelector('.slot-entities-trigger');
+          const dropdown = slotEntitiesWrap.querySelector('.slot-entities-dropdown');
+          const selectAllInput = slotEntitiesWrap.querySelector('.slot-entities-select-all-input');
+          if (trigger && dropdown) {
+            trigger.addEventListener('click', (e) => {
+              e.stopPropagation();
+              const open = dropdown.classList.toggle('open');
+              trigger.classList.toggle('open', open);
+              if (open) {
+                const close = (ev) => {
+                  if (slotEntitiesWrap.contains(ev.target)) return;
+                  document.removeEventListener('click', close);
+                  dropdown.classList.remove('open');
+                  trigger.classList.remove('open');
+                };
+                setTimeout(() => document.addEventListener('click', close), 0);
+              }
+            });
+          }
+          if (selectAllInput) {
+            const listEl = slotEntitiesWrap.querySelector('.entities-selector-list');
+            selectAllInput.addEventListener('change', () => {
+              if (!listEl) return;
+              const inputs = listEl.querySelectorAll('input[name="entities-selector-entity"]:not(:disabled)');
+              inputs.forEach(inp => { inp.checked = selectAllInput.checked; });
+              this._updateSlotEntitiesChips(slotEntitiesWrap);
+            });
+          }
+          const listElForSync = slotEntitiesWrap.querySelector('.entities-selector-list');
+          if (listElForSync && selectAllInput) {
+            listElForSync.addEventListener('change', () => {
+              this._updateSlotEntitiesChips(slotEntitiesWrap);
+              const all = listElForSync.querySelectorAll('input[name="entities-selector-entity"]:not(:disabled)');
+              const checkedCount = Array.from(all).filter(inp => inp.checked).length;
+              selectAllInput.checked = checkedCount === all.length;
+              selectAllInput.indeterminate = checkedCount > 0 && checkedCount < all.length;
+            });
+          }
+        }
       }
 
       // Weekday selector - use shared component
@@ -1827,103 +2262,43 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           }
         };
         
-        // First, attach shared component listeners (this handles mode buttons and custom weekdays)
-        // This will clone elements, so we need to add our handlers AFTER
+        // Attach shared component listeners (handles mode switch + show/hide custom weekdays)
         WeekdaySelector.attachEventListeners(itemEl);
         
-        // Check elements AFTER attachEventListeners
-        const modeBtnsAfter = itemEl.querySelectorAll('.weekday-mode-btn');
-        const weekdayBtnsAfter = itemEl.querySelectorAll('.popup-weekday');
-        
-        // Add handlers directly to the CLONED elements (after attachEventListeners)
-        // Use retry mechanism to ensure elements are ready
+        // Add only updateWeekdays and Custom-mode day sync; do NOT clone (cloning removed shared handler → first-click glitch)
         const addWeekdayHandlers = () => {
           const modeBtns = itemEl.querySelectorAll('.weekday-mode-btn');
           const weekdayBtns = itemEl.querySelectorAll('.popup-weekday');
-          
-          
           if (modeBtns.length === 0 && weekdayBtns.length === 0) {
             setTimeout(addWeekdayHandlers, 50);
             return;
           }
-          
-          
-          // Add handler to mode buttons
-          modeBtns.forEach((btn, index) => {
-            // Remove any existing handlers by cloning
-            const newBtn = btn.cloneNode(true);
-            btn.parentNode.replaceChild(newBtn, btn);
-            
-            // Add WeekdaySelector handler first
-            newBtn.addEventListener('click', (e) => {
-              const scope = newBtn.closest('.slot-card') || itemEl;
-              scope.querySelectorAll('.weekday-mode-btn').forEach(b => b.classList.remove('active'));
-              newBtn.classList.add('active');
-              const mode = newBtn.dataset.mode;
-              
-              // Find custom weekdays - search in slot card (not popup-field, as slots don't have it)
-              const slotCard = newBtn.closest('.slot-card') || itemEl;
-              let customWeekdays = slotCard.querySelector('#popup-weekdays-custom') || slotCard.querySelector('.popup-weekdays');
-              
-              
-              if (mode === 'everyday' || mode === 'weekdays') {
-                if (customWeekdays) {
-                  customWeekdays.classList.add('hidden');
-                }
-              } else {
-                // Custom mode - show and set active days from current item
-                if (customWeekdays) {
-                  customWeekdays.classList.remove('hidden');
-                  
-                  // Get current item weekdays and set them as active
-                  const currentItems = this._getItems();
-                  const currentItem = currentItems.find(i => i.id === itemId);
-                  if (currentItem && currentItem.weekdays) {
-                    // Set active state for days that are in currentItem.weekdays
-                    slotCard.querySelectorAll('.popup-weekday').forEach(dayEl => {
-                      const day = parseInt(dayEl.dataset.day);
-                      if (currentItem.weekdays.includes(day)) {
-                        dayEl.classList.add('active');
-                      } else {
-                        dayEl.classList.remove('active');
-                      }
-                    });
+          modeBtns.forEach((btn) => {
+            btn.addEventListener('click', () => {
+              if (btn.dataset.mode === 'custom') {
+                requestAnimationFrame(() => {
+                  const slotCard = btn.closest('.slot-card') || itemEl;
+                  const customWeekdays = slotCard.querySelector('#popup-weekdays-custom') || slotCard.querySelector('.popup-weekdays');
+                  if (customWeekdays) {
+                    const currentItems = this._getItems();
+                    const currentItem = currentItems.find(i => i.id === itemId);
+                    if (currentItem && currentItem.weekdays) {
+                      slotCard.querySelectorAll('.popup-weekday').forEach(dayEl => {
+                        const day = parseInt(dayEl.dataset.day);
+                        dayEl.classList.toggle('active', currentItem.weekdays.includes(day));
+                      });
+                    }
                   }
-                } else {
-                }
+                });
               }
-            });
-            
-            // Then add our update handler
-            newBtn.addEventListener('click', (e) => {
-              e.stopPropagation();
               setTimeout(updateWeekdays, 100);
             });
           });
-          
-          // Add handler to custom weekday buttons
-          weekdayBtns.forEach((dayEl, index) => {
-            // Remove any existing handlers by cloning
-            const newDayEl = dayEl.cloneNode(true);
-            dayEl.parentNode.replaceChild(newDayEl, dayEl);
-            
-            // Add WeekdaySelector handler first
-            newDayEl.addEventListener('click', (e) => {
-              newDayEl.classList.toggle('active');
-            });
-            
-            // Then add our update handler
-            newDayEl.addEventListener('click', (e) => {
-              e.stopPropagation();
-              setTimeout(updateWeekdays, 100);
-            });
+          weekdayBtns.forEach((dayEl) => {
+            dayEl.addEventListener('click', () => setTimeout(updateWeekdays, 100));
           });
         };
-        
-        // Start trying to add handlers - use longer delay to ensure attachEventListeners finished
-        setTimeout(() => {
-          addWeekdayHandlers();
-        }, 100);
+        setTimeout(addWeekdayHandlers, 0);
       } else {}
     });
   }
@@ -1975,5 +2350,13 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-climate-slots')) {
   customElements.define('homie-scheduler-climate-slots', HomieClimateScheduleSlotsCard);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: 'custom:homie-scheduler-climate-slots',
+    name: 'Homie Scheduler Climate',
+    description: 'Climate schedule slots card',
+    icon: 'https://brands.home-assistant.io/custom_integrations/homie_scheduler/icon.png',
+    preview: false
+  });
   window.logCardInfo('climate-slots-card');
 }

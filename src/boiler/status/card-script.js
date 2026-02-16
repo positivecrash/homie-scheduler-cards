@@ -10,6 +10,10 @@
  */
 
 class HomieBoilerStatusCard extends HTMLElement {
+  static getStubConfig() {
+    return { entity: '' };
+  }
+
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
@@ -925,5 +929,13 @@ class HomieBoilerStatusCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-boiler-status')) {
   customElements.define('homie-scheduler-boiler-status', HomieBoilerStatusCard);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: 'custom:homie-scheduler-boiler-status',
+    name: 'Homie Scheduler Boiler Status',
+    description: 'Boiler status and toggle',
+    icon: 'https://brands.home-assistant.io/custom_integrations/homie_scheduler/icon.png',
+    preview: false
+  });
   window.logCardInfo('boiler-status-card');
 }

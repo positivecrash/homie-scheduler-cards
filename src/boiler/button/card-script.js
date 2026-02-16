@@ -14,6 +14,10 @@
 // DO NOT include ScheduleHelper, DurationSelector, or WeekdaySelector here - they will be added during build
 
 class HomieBoilerScheduleButtonCard extends HTMLElement {
+  static getStubConfig() {
+    return { entity: '', duration: 0 };
+  }
+
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
@@ -1044,5 +1048,13 @@ class HomieBoilerScheduleButtonCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-boiler-button')) {
   customElements.define('homie-scheduler-boiler-button', HomieBoilerScheduleButtonCard);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: 'custom:homie-scheduler-boiler-button',
+    name: 'Homie Scheduler Button',
+    description: 'Quick schedule button',
+    icon: 'https://brands.home-assistant.io/custom_integrations/homie_scheduler/icon.png',
+    preview: false
+  });
   window.logCardInfo('boiler-button-card');
 }

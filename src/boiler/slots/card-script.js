@@ -13,6 +13,10 @@
 const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
 
 class HomieBoilerScheduleSlotsCard extends HTMLElement {
+  static getStubConfig() {
+    return { entity: '', title: 'Schedule' };
+  }
+
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
@@ -1849,5 +1853,13 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
 // Register custom element (safe: skip if already defined)
 if (typeof customElements !== 'undefined' && !customElements.get('homie-scheduler-boiler-slots')) {
   customElements.define('homie-scheduler-boiler-slots', HomieBoilerScheduleSlotsCard);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: 'custom:homie-scheduler-boiler-slots',
+    name: 'Homie Scheduler Boiler',
+    description: 'Boiler schedule slots card',
+    icon: 'https://brands.home-assistant.io/custom_integrations/homie_scheduler/icon.png',
+    preview: false
+  });
   window.logCardInfo('boiler-slots-card');
 }

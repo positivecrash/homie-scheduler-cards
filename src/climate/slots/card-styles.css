@@ -6,7 +6,7 @@
 :host {
   display: block;
   padding: 0;
-  overflow: hidden;
+  overflow: visible;
   background: transparent;
   --circular-button-size: var(--mdc-icon-button-size, 40px);
 
@@ -154,7 +154,9 @@
   transition: max-height 0.3s ease-out;
 }
 .slot-card.expanded .slot-expandable {
-  max-height: 500px;
+  max-height: 75vh;
+  overflow-y: auto;
+  overflow-x: visible;
   transition: max-height 0.3s ease-in;
   padding: var(--ha-card-header-padding, 16px) 0;
   display: flex;
@@ -198,6 +200,7 @@
   font-size: 14px;
   font-weight: 500;
   font-family: inherit;
+  flex-shrink: 0;
 }
 .slot-delete:active { transform: scale(0.98); }
 .slot-delete ha-icon { --mdc-icon-size: 22px; }
@@ -247,6 +250,193 @@
 .popup-body { padding: var(--ha-card-header-padding, 20px); }
 .popup-field { margin-bottom: 20px; }
 .popup-field:last-child { margin-bottom: 0; }
+.popup-field-mode .popup-mode-select,
+#popup-hvac-mode {
+  width: 100%;
+  box-sizing: border-box;
+}
+.popup-hvac-mode-warning {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--_error-color);
+  line-height: 1.4;
+}
+.popup-hvac-mode-warning:empty { display: none; }
+/* Entities multi-select: compact trigger + dropdown */
+.popup-entities-wrap {
+  position: relative;
+}
+.popup-entities-trigger {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 12px;
+  border-radius: var(--_radius-medium);
+  border: 1px solid var(--_divider);
+  background: var(--_bg-select);
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.popup-entities-trigger:hover,
+.popup-entities-trigger.open {
+  border-color: var(--_accent);
+  box-shadow: var(--_focus-ring);
+}
+.popup-entities-chips {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-height: 24px;
+}
+.popup-entity-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--_radius-small);
+  background: var(--_secondary-bg);
+  border: 1px solid var(--_divider);
+  font-size: 12px;
+  color: var(--_text);
+  white-space: nowrap;
+}
+.popup-entities-caret {
+  --mdc-icon-size: 20px;
+  color: var(--_text-secondary);
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+.popup-entities-trigger.open .popup-entities-caret {
+  transform: rotate(180deg);
+}
+.popup-entities-dropdown {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  z-index: 10;
+  flex-direction: column;
+  border-radius: var(--_radius-medium);
+  border: 1px solid var(--_divider);
+  background: var(--_popup-bg);
+  box-shadow: var(--_popup-box-shadow);
+  max-height: 220px;
+  overflow: hidden;
+}
+.popup-entities-dropdown.open {
+  display: flex;
+}
+.popup-entity-select-all {
+  border-bottom: 1px solid var(--_divider);
+  flex-shrink: 0;
+}
+.popup-entities-list {
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.popup-entity-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--_divider);
+  transition: background 0.2s;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.popup-entity-row:last-child {
+  border-bottom: none;
+}
+.popup-entity-row:hover {
+  background: var(--_secondary-bg);
+}
+.popup-entity-row.hidden {
+  display: none;
+}
+.popup-entity-row-unsupported {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.popup-entity-row-unsupported .popup-entity-name::after {
+  content: ' (not supported for this mode)';
+  font-size: 11px;
+  color: var(--_text-secondary);
+  font-weight: 400;
+}
+/* Shared entities-selector inside popup dropdown */
+.popup-entities-dropdown .entities-selector-list {
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.popup-entities-dropdown .entities-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--_divider);
+  transition: background 0.2s;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.popup-entities-dropdown .entities-selector-row:last-child {
+  border-bottom: none;
+}
+.popup-entities-dropdown .entities-selector-row:hover {
+  background: var(--_secondary-bg);
+}
+.popup-entities-dropdown .entities-selector-row.hidden {
+  display: none;
+}
+.popup-entities-dropdown .entities-selector-row-unsupported {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.popup-entities-dropdown .entities-selector-row-unsupported .entities-selector-entity-name::after {
+  content: ' (not supported for this mode)';
+  font-size: 11px;
+  color: var(--_text-secondary);
+  font-weight: 400;
+}
+.popup-entity-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--_accent);
+  flex-shrink: 0;
+}
+.popup-entity-row ha-icon {
+  --mdc-icon-size: 22px;
+  color: var(--_text-secondary);
+  flex-shrink: 0;
+}
+.popup-entity-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--_text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popup-entities-list label {
+  cursor: pointer;
+}
 .popup-field label {
   display: flex;
   align-items: center;
@@ -257,6 +447,34 @@
   color: var(--_text);
 }
 .popup-field label ha-icon { --mdc-icon-size: 24px; color: var(--_accent); }
+
+/* HA-style row: label left, control (e.g. ha-switch) right */
+.popup-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  gap: 16px;
+  cursor: pointer;
+}
+.popup-field-row-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--_text);
+  cursor: pointer;
+  margin: 0;
+  flex: 1;
+}
+.popup-field-row-label ha-icon {
+  --mdc-icon-size: 24px;
+  color: var(--_accent);
+}
+.popup-duration-row ha-switch {
+  flex-shrink: 0;
+}
 .popup-footer {
   display: flex;
   gap: var(--mdc-layout-grid-gutter, 12px);
@@ -627,6 +845,200 @@
 .slot-hvac-mode ha-icon {
   --mdc-icon-size: 22px;
   opacity: 0.9;
+}
+
+.slot-entities-wrap {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--_divider);
+  position: relative;
+}
+.slot-entities-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--_text);
+  margin-bottom: 8px;
+}
+.slot-entities-label ha-icon {
+  --mdc-icon-size: 22px;
+  color: var(--_accent);
+}
+/* Slot entities dropdown (same UX as popup) */
+.slot-entities-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 12px;
+  border-radius: var(--_radius-medium);
+  border: 1px solid var(--_divider);
+  background: var(--_bg-select);
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.slot-entities-trigger:hover,
+.slot-entities-trigger.open {
+  border-color: var(--_accent);
+  box-shadow: var(--_focus-ring);
+}
+.slot-entities-chips {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-height: 24px;
+}
+.slot-entities-chips .popup-entity-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--_radius-small);
+  background: var(--_secondary-bg);
+  border: 1px solid var(--_divider);
+  font-size: 12px;
+  color: var(--_text);
+  white-space: nowrap;
+}
+.slot-entities-caret {
+  --mdc-icon-size: 20px;
+  color: var(--_text-secondary);
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+.slot-entities-trigger.open .slot-entities-caret {
+  transform: rotate(180deg);
+}
+.slot-entities-dropdown {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  z-index: 10;
+  flex-direction: column;
+  border-radius: var(--_radius-medium);
+  border: 1px solid var(--_divider);
+  background: var(--_popup-bg);
+  box-shadow: var(--_popup-box-shadow);
+  max-height: 220px;
+  overflow: hidden;
+}
+.slot-entities-wrap .slot-entities-dropdown.open {
+  display: flex;
+}
+.slot-entity-select-all {
+  border-bottom: 1px solid var(--_divider);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.slot-entity-select-all input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--_accent);
+  flex-shrink: 0;
+}
+.slot-entities-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.slot-entity-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  cursor: pointer;
+  font-size: 14px;
+}
+.slot-entity-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--_accent);
+  flex-shrink: 0;
+}
+.slot-entity-row ha-icon {
+  --mdc-icon-size: 20px;
+  color: var(--_text-secondary);
+  flex-shrink: 0;
+}
+.slot-entity-name {
+  flex: 1;
+  color: var(--_text);
+}
+/* Shared entities-selector inside slot */
+.slot-entities-wrap .entities-selector-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.slot-entities-wrap .entities-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  cursor: pointer;
+  font-size: 14px;
+}
+.slot-entities-wrap .entities-selector-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--_accent);
+  flex-shrink: 0;
+}
+.slot-entities-wrap .entities-selector-row ha-icon {
+  --mdc-icon-size: 20px;
+  color: var(--_text-secondary);
+  flex-shrink: 0;
+}
+.slot-entities-wrap .entities-selector-entity-name {
+  flex: 1;
+  color: var(--_text);
+}
+.slot-entities-wrap .slot-entities-dropdown .entities-selector-list {
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 0;
+}
+.slot-entities-wrap .slot-entities-dropdown .entities-selector-row {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--_divider);
+  gap: 12px;
+}
+.slot-entities-wrap .slot-entities-dropdown .entities-selector-row:last-child {
+  border-bottom: none;
+}
+.slot-entities-wrap .slot-entities-dropdown .entities-selector-row:hover {
+  background: var(--_secondary-bg);
+}
+.slot-entities-wrap .entities-selector-row-unsupported {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.slot-entities-wrap .entities-selector-row-unsupported .entities-selector-entity-name::after {
+  content: ' (not supported for this mode)';
+  font-size: 11px;
+  color: var(--_text-secondary);
+  font-weight: 400;
+}
+.slot-hvac-mode select {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 /* Time picker styles are now in shared/homie-select/homie-select.css */
