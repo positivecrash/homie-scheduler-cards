@@ -6,7 +6,7 @@
         <!-- <ha-icon icon="{{ICON}}"></ha-icon> -->
       </div>
       <div class="header-text">
-        <div class="header-title">
+        <div class="header-title {{HEADER_TITLE_CLASS}}">
           {{TITLE}}
         </div>
         <div class="header-status">{{STATUS_TEXT}}</div>
@@ -184,6 +184,10 @@
     
     <div class="slot-expandable">
       <div class="slot-details">
+        <div class="slot-title">
+          <ha-icon icon="mdi:label-outline"></ha-icon>
+          <input type="text" class="homie-input slot-title-input" data-action="update-slot-title" data-item-id="{{ITEM_ID}}" value="{{SLOT_TITLE}}" placeholder="Slot name">
+        </div>
         <div class="slot-time">
           <ha-icon icon="mdi:clock-outline"></ha-icon>
           <div class="time-selects">
@@ -268,7 +272,7 @@
       
       <button class="slot-delete" data-action="delete-item">
         <ha-icon icon="mdi:delete"></ha-icon>
-        <span>Remove {{SLOT_NAME}}</span>
+        <span>Remove {{SLOT_NAME_REMOVE}}</span>
       </button>
     </div>
   </div>

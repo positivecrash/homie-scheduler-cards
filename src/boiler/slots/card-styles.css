@@ -453,6 +453,10 @@
   line-height: 22px;
 }
 
+.header-title--hidden {
+  display: none;
+}
+
 .header-status {
   font-size: 14px;
   color: var(--secondary-text-color, #757575);

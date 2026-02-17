@@ -1310,7 +1310,8 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
 
       const items = this._getItems();
     const enabled = this._isEnabledForDisplay();
-    const title = this._config.title || 'Water Heater Scheduler';
+    const title = this._config?.title ?? '';
+    const headerTitleClass = title ? '' : 'header-title--hidden';
     const enabledClass = enabled ? 'enabled' : 'disabled';
     
     // Build status text
@@ -1364,6 +1365,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     const slotsContainerClass = items.length === 0 ? ' slots-container--empty' : '';
     const htmlContent = processedTemplate
       .replace(/\{\{TITLE\}\}/g, title)
+      .replace(/\{\{HEADER_TITLE_CLASS\}\}/g, headerTitleClass)
       .replace(/\{\{STATUS_TEXT\}\}/g, statusText)
       .replace(/\{\{ENABLED_CLASS\}\}/g, enabledClass)
       .replace(/\{\{SLOTS_CONTAINER_CLASS\}\}/g, slotsContainerClass)

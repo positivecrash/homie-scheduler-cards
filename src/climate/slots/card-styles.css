@@ -671,6 +671,10 @@
   line-height: 24px;
 }
 
+.header-title--hidden {
+  display: none;
+}
+
 .header-status {
   font-size: 14px;
   color: var(--secondary-text-color, #757575);
@@ -830,6 +834,25 @@
 }
 
 /* Slot expandable, slot-details styles moved to shared/assets/homie-css.css */
+
+.slot-title {
+  display: flex;
+  align-items: center;
+  gap: var(--mdc-layout-grid-gutter, 6px);
+  font-size: 14px;
+  width: 100%;
+  flex-basis: 100%;
+  margin-bottom: var(--mdc-layout-grid-gutter, 8px);
+}
+.slot-title ha-icon {
+  --mdc-icon-size: 22px;
+  opacity: 0.9;
+}
+.slot-title .slot-title-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+}
 
 .slot-time,
 .slot-duration,

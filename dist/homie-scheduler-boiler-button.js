@@ -1,6 +1,6 @@
 /**
  * Scheduler Boiler Button Card
- * Last build: 2026-02-16T05:54:48.883Z
+ * Last build: 2026-02-16T07:28:09.577Z
  * Version: 1.0.6
  */
 window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.6';

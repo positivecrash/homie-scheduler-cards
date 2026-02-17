@@ -26,7 +26,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     this._bridgeSensor = null;
     this._debounceTimer = null;
     this._htmlTemplate = null;
-    this._expandedSlots = new Set(); // Track expanded slots
+    this._expandedSlots = new Set(); // Track expanded slots by key (time|weekdays) so adding/removing entities doesn't collapse
     this._configError = null; // Store config error message
     this._unsubStateChanged = null; // Unsubscribe function for state_changed events
     this._optimisticBridgeState = null; // Local overlay for optimistic updates (avoids mutating hass.states)
@@ -900,7 +900,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     this._updateSlotTitleFromEntities(slotEntitiesWrap, names);
   }
 
-  /** Update slot header name and remove button text to match current entity selection. */
+  /** Update slot header name and remove button text to match current entity selection and optional custom title. */
   _updateSlotTitleFromEntities(slotEntitiesWrap, entityNames) {
     if (!slotEntitiesWrap) return;
     const slotCard = slotEntitiesWrap.closest('.slot-card');
@@ -908,11 +908,13 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     const slotCards = this.shadowRoot.querySelectorAll('.slot-card');
     const slotNumber = slotCards.length ? Array.from(slotCards).indexOf(slotCard) + 1 : 1;
     const entityLabel = (entityNames && entityNames.length > 0) ? entityNames.join(', ') : '';
-    const slotName = `Slot ${slotNumber}` + (entityLabel ? ` (${entityLabel})` : '');
+    const titleInput = slotCard.querySelector('.slot-title-input');
+    const baseName = (titleInput && titleInput.value.trim()) || `Slot ${slotNumber}`;
+    const slotName = baseName + (entityLabel ? ` (${entityLabel})` : '');
     const nameEl = slotCard.querySelector('.slot-name');
     if (nameEl) nameEl.textContent = slotName;
     const removeSpan = slotCard.querySelector('.slot-delete span');
-    if (removeSpan) removeSpan.textContent = 'Remove ' + slotName;
+    if (removeSpan) removeSpan.textContent = 'Remove ' + baseName;
   }
 
   _updateSlotEntitiesForMode(slotEntitiesWrap, itemEl) {
@@ -1393,6 +1395,32 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     // Update weekday selector state
     WeekdaySelector.setSelectedWeekdays(this.shadowRoot, updatedItem.weekdays, slotCard);
 
+    // Update slot title input and slot name in header
+    const titleInput = slotCard.querySelector('.slot-title-input');
+    if (titleInput && titleInput.value !== (updatedItem.title || '')) {
+      titleInput.value = updatedItem.title || '';
+    }
+    const slotNameEl = slotCard.querySelector('.slot-name');
+    const removeSpan = slotCard.querySelector('.slot-delete span');
+    if (slotNameEl || removeSpan) {
+      const entities = this._getEntities();
+      const bridgeState = this._getBridgeState();
+      const allItems = bridgeState?.attributes?.items || [];
+      const entitySet = new Set(entities);
+      const sameSlotItems = allItems.filter(i =>
+        i && i.temporary !== true && entitySet.has(i.entity_id) &&
+        i.time === updatedItem.time && JSON.stringify(i.weekdays || []) === JSON.stringify(updatedItem.weekdays || [])
+      );
+      const entityLabel = sameSlotItems.length > 0
+        ? sameSlotItems.map(i => this._hass?.states?.[i.entity_id]?.attributes?.friendly_name || i.entity_id).join(', ')
+        : '';
+      const slotNumber = Array.from(this.shadowRoot.querySelectorAll('.slot-card')).indexOf(slotCard) + 1;
+      const baseName = updatedItem.title || `Slot ${slotNumber}`;
+      const slotName = baseName + (entityLabel ? ` (${entityLabel})` : '');
+      if (slotNameEl) slotNameEl.textContent = slotName;
+      if (removeSpan) removeSpan.textContent = 'Remove ' + baseName;
+    }
+
     // Update icon and card classes (scheduler must be on for slot to show as enabled)
     const schedulerOn = this._isSchedulerEnabled();
     const showEnabled = schedulerOn && updatedItem.enabled;
@@ -1428,7 +1456,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
   async _updateItem(itemId, updates) {
     const bridgeState = this._getBridgeState();
-    const isSlotWideUpdate = bridgeState && (updates.time !== undefined || updates.duration !== undefined || updates.weekdays !== undefined);
+    const isSlotWideUpdate = bridgeState && (updates.time !== undefined || updates.duration !== undefined || updates.weekdays !== undefined || updates.title !== undefined);
     const itemIdsToUpdate = isSlotWideUpdate && bridgeState ? this._getSameSlotItemIds(bridgeState, itemId) : [itemId];
 
     // Optimistically update (using overlay, no hass mutation)
@@ -1506,42 +1534,65 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
   }
 
-  async _deleteItem(itemId) {
-    await this._callService('delete_item', { id: itemId });
-    
-    // Force update after deleting item - request entity update and re-render
+  /** Delete all items in the same slot (same time + weekdays) so the whole slot is removed. */
+  async _deleteSlot(itemId) {
+    const bridgeState = this._getBridgeState();
+    const itemIdsToDelete = bridgeState ? this._getSameSlotItemIds(bridgeState, itemId) : [itemId];
+    for (const id of itemIdsToDelete) {
+      await this._callService('delete_item', { id });
+    }
     if (this._hass && this._bridgeSensor) {
-      // Request entity update from server
       try {
         await this._hass.callService('homeassistant', 'update_entity', {
           entity_id: this._bridgeSensor
         });
       } catch (e) {
       }
-      
-      // Wait for state to update from server, then trigger full re-render
-      setTimeout(async () => {
+      setTimeout(() => {
         if (this._hass) {
-          // Request fresh state again
           try {
-            await this._hass.callService('homeassistant', 'update_entity', {
+            this._hass.callService('homeassistant', 'update_entity', {
               entity_id: this._bridgeSensor
             });
           } catch (e) {
           }
-          
-          // Trigger full re-render
           setTimeout(() => {
             if (this._hass) {
               this._optimisticBridgeState = null;
               this.hass = { ...this._hass };
               this.render().catch(() => {});
-              
-              // Sync all other cards with the same entity after state is updated
-              // Use a small delay to ensure bridge sensor state is fresh
-              setTimeout(() => {
-                this._syncAllCardsForEntity();
-              }, 100);
+              setTimeout(() => this._syncAllCardsForEntity(), 100);
+            }
+          }, 200);
+        }
+      }, 500);
+    }
+  }
+
+  /** Delete a single item (e.g. when user unchecks one entity in the slot). Does not delete the whole slot. */
+  async _deleteItem(itemId) {
+    await this._callService('delete_item', { id: itemId });
+    if (this._hass && this._bridgeSensor) {
+      try {
+        await this._hass.callService('homeassistant', 'update_entity', {
+          entity_id: this._bridgeSensor
+        });
+      } catch (e) {
+      }
+      setTimeout(() => {
+        if (this._hass) {
+          try {
+            this._hass.callService('homeassistant', 'update_entity', {
+              entity_id: this._bridgeSensor
+            });
+          } catch (e) {
+          }
+          setTimeout(() => {
+            if (this._hass) {
+              this._optimisticBridgeState = null;
+              this.hass = { ...this._hass };
+              this.render().catch(() => {});
+              setTimeout(() => this._syncAllCardsForEntity(), 100);
             }
           }, 200);
         }
@@ -1599,7 +1650,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
       const items = this._getItems();
     const enabled = this._isEnabledForDisplay();
-    const title = this._config.title || 'Water Heater Scheduler';
+    const title = this._config?.title ?? '';
+    const headerTitleClass = title ? '' : 'header-title--hidden';
     const enabledClass = enabled ? 'enabled' : 'disabled';
     
     // Build status text
@@ -1669,6 +1721,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     // Replace placeholders (icon is now fixed in template)
     const htmlContent = processedTemplate
       .replace(/\{\{TITLE\}\}/g, title)
+      .replace(/\{\{HEADER_TITLE_CLASS\}\}/g, headerTitleClass)
       .replace(/\{\{STATUS_TEXT\}\}/g, statusText)
       .replace(/\{\{ENABLED_CLASS\}\}/g, enabledClass)
       .replace(/\{\{SLOTS_CONTAINER_CLASS\}\}/g, items.length === 0 ? ' slots-container--empty' : '')
@@ -1717,7 +1770,9 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       const names = sameSlotItems.map(i => this._hass?.states?.[i.entity_id]?.attributes?.friendly_name || i.entity_id);
       entityLabel = names.length > 0 ? names.join(', ') : (this._hass?.states?.[item.entity_id]?.attributes?.friendly_name || item.entity_id);
     }
-    const slotName = item.title || `Slot ${slotNumber}` + (entityLabel ? ` (${entityLabel})` : '');
+    const slotTitle = item.title || '';
+    const baseName = slotTitle || `Slot ${slotNumber}`;
+    const slotName = baseName + (entityLabel ? ` (${entityLabel})` : '');
     
     // Format slot status
     const daysText = WeekdaySelector.formatWeekdays(item.weekdays);
@@ -1784,6 +1839,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       .replace(/\{\{ITEM_ID\}\}/g, item.id)
       .replace(/\{\{SLOT_NUMBER\}\}/g, slotNumber)
       .replace(/\{\{SLOT_NAME\}\}/g, slotName)
+      .replace(/\{\{SLOT_NAME_REMOVE\}\}/g, baseName)
+      .replace(/\{\{SLOT_TITLE\}\}/g, slotTitle)
       .replace(/\{\{DISABLED_CLASS\}\}/g, (slotEnabled && item.enabled) ? '' : 'disabled')
       .replace(/\{\{ICON_CLASS\}\}/g, (slotEnabled && item.enabled) ? 'enabled' : 'disabled')
       .replace(/\{\{SLOT_STATUS\}\}/g, slotStatus)
@@ -1955,6 +2012,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         });
       }
 
+      const slotKey = (item.time || '') + '|' + JSON.stringify(item.weekdays || []);
+
       // Toggle expand/collapse
       const expandBtn = itemEl.querySelector('[data-action="toggle-expand"]');
       if (expandBtn) {
@@ -1963,10 +2022,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           const isExpanded = itemEl.classList.contains('expanded');
           if (isExpanded) {
             itemEl.classList.remove('expanded');
-            this._expandedSlots.delete(itemId);
+            this._expandedSlots.delete(slotKey);
           } else {
             itemEl.classList.add('expanded');
-            this._expandedSlots.add(itemId);
+            this._expandedSlots.add(slotKey);
           }
           const icon = expandBtn.querySelector('ha-icon');
           if (icon) {
@@ -1975,8 +2034,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         });
       }
 
-      // Restore expanded state if it was expanded before
-      if (this._expandedSlots.has(itemId)) {
+      // Restore expanded state if this slot was expanded before (by time+weekdays so it survives entity add/remove)
+      if (this._expandedSlots.has(slotKey)) {
         itemEl.classList.add('expanded');
         const icon = expandBtn?.querySelector('ha-icon');
         if (icon) {
@@ -1997,8 +2056,46 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       if (deleteBtn) {
         deleteBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          this._deleteItem(itemId);
+          this._deleteSlot(itemId);
         });
+      }
+
+      // Slot title input - same pattern as boiler slots; update display on input, save on blur/debounce
+      const titleInput = itemEl.querySelector('.slot-title-input');
+      if (titleInput) {
+        let titleDebounce = null;
+        const applyTitle = () => {
+          if (itemEl.dataset.updating === 'true') return;
+          const newTitle = titleInput.value.trim() || null;
+          this._updateItem(itemId, { title: newTitle });
+        };
+        const refreshSlotNameDisplay = () => {
+          const slotEntitiesWrap = itemEl.querySelector('.slot-entities-wrap');
+          const listEl = slotEntitiesWrap?.querySelector('.entities-selector-list');
+          const names = listEl ? Array.from(listEl.querySelectorAll('input[name="entities-selector-entity"]:checked')).map(inp => {
+            const row = inp.closest('.entities-selector-row');
+            const nameEl = row?.querySelector('.entities-selector-entity-name');
+            return nameEl ? nameEl.textContent : inp.value;
+          }) : [];
+          const slotNumber = Array.from(this.shadowRoot.querySelectorAll('.slot-card')).indexOf(itemEl) + 1;
+          const baseName = titleInput.value.trim() || `Slot ${slotNumber}`;
+          const entityLabel = names.length > 0 ? names.join(', ') : '';
+          const slotName = baseName + (entityLabel ? ` (${entityLabel})` : '');
+          const nameEl = itemEl.querySelector('.slot-name');
+          if (nameEl) nameEl.textContent = slotName;
+          const removeSpan = itemEl.querySelector('.slot-delete span');
+          if (removeSpan) removeSpan.textContent = 'Remove ' + baseName;
+        };
+        titleInput.addEventListener('blur', () => {
+          clearTimeout(titleDebounce);
+          applyTitle();
+        });
+        titleInput.addEventListener('input', () => {
+          refreshSlotNameDisplay();
+          clearTimeout(titleDebounce);
+          titleDebounce = setTimeout(applyTitle, 500);
+        });
+        titleInput.addEventListener('click', (e) => e.stopPropagation());
       }
 
       // Update time - hours and minutes selects

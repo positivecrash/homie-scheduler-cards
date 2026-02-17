@@ -1,6 +1,6 @@
 /**
  * Scheduler Boiler Status Card
- * Last build: 2026-02-16T05:54:49.141Z
+ * Last build: 2026-02-16T07:28:09.777Z
  * Version: 1.0.6
  */
 window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.6';
@@ -1723,7 +1723,8 @@ class HomieBoilerStatusCard extends HTMLElement {
       const template = await this._loadTemplate();
       
       const isOn = this._isEntityOn();
-      const title = this._getTitle();
+      const titleForHeader = this._config?.title ? this._escapeHtml(this._config.title) : '';
+      const titleWithSpace = titleForHeader ? titleForHeader + ' ' : '';
       const subtitle = this._getSubtitle();
       
       const iconButtonClass = isOn ? 'active' : '';
@@ -1736,7 +1737,7 @@ class HomieBoilerStatusCard extends HTMLElement {
 
       const htmlContent = template
         .replace(/\{\{ICON_BUTTON_CLASS\}\}/g, iconButtonClass)
-        .replace(/\{\{TITLE\}\}/g, this._escapeHtml(title))
+        .replace(/\{\{TITLE\}\}/g, titleWithSpace)
         .replace(/\{\{ENTITY_STATUS\}\}/g, entityStatus)
         .replace(/\{\{SUBTITLE\}\}/g, this._escapeHtml(subtitle))
         .replace(/\{\{MAX_TIME_HIDDEN_CLASS\}\}/g, maxTimeHiddenClass)
