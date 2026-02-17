@@ -1,6 +1,6 @@
 /**
  * Scheduler Climate Slots Card
- * Last build: 2026-02-16T07:28:09.850Z
+ * Last build: 2026-02-17T15:15:42.013Z
  * Version: 1.0.6
  */
 window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.6';
@@ -2065,9 +2065,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         if (nextRun) {
           statusText = `Next run: ${nextRun}`;
           
-          // Check if we need to start seconds countdown timer
-          // If nextRun contains "in Xs" (seconds), we need to update every second
-          if (nextRun.includes('in ') && nextRun.includes('s')) {
+          // Run countdown timer whenever we show relative time ("in 2m", "in 45s") so it updates without reload
+          if (nextRun.includes('in ')) {
             needsSecondsTimer = true;
           }
         }
@@ -2288,6 +2287,21 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     const bridgeState = this._getBridgeState();
     const isSlotWideUpdate = bridgeState && (updates.time !== undefined || updates.duration !== undefined || updates.weekdays !== undefined || updates.title !== undefined);
     const itemIdsToUpdate = isSlotWideUpdate && bridgeState ? this._getSameSlotItemIds(bridgeState, itemId) : [itemId];
+
+    // Keep slot expanded when time or weekdays change: migrate expanded state from old slotKey to new
+    if (bridgeState?.attributes?.items && (updates.time !== undefined || updates.weekdays !== undefined)) {
+      const currentItem = bridgeState.attributes.items.find(i => i && i.id === itemId);
+      if (currentItem) {
+        const oldKey = (currentItem.time || '') + '|' + JSON.stringify(currentItem.weekdays || []);
+        const newTime = updates.time !== undefined ? updates.time : currentItem.time;
+        const newWeekdays = updates.weekdays !== undefined ? updates.weekdays : currentItem.weekdays;
+        const newKey = (newTime || '') + '|' + JSON.stringify(newWeekdays || []);
+        if (oldKey !== newKey && this._expandedSlots.has(oldKey)) {
+          this._expandedSlots.delete(oldKey);
+          this._expandedSlots.add(newKey);
+        }
+      }
+    }
 
     // Optimistically update (using overlay, no hass mutation)
     if (this._hass && this._bridgeSensor && bridgeState?.attributes?.items) {
