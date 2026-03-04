@@ -1,9 +1,9 @@
 /**
  * Scheduler Boiler Slots Card
- * Last build: 2026-03-04T17:42:14.605Z
- * Version: 1.1.0
+ * Last build: 2026-03-04T19:18:29.027Z
+ * Version: 1.1.1
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.0';
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.1';
 
 const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
 

@@ -1,9 +1,9 @@
 /**
  * Scheduler Climate Slots Card
- * Last build: 2026-03-04T17:42:17.094Z
- * Version: 1.1.0
+ * Last build: 2026-03-04T19:18:29.252Z
+ * Version: 1.1.1
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.0';
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.1';
 
 const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
 
@@ -2060,24 +2060,31 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     this._closeAddPopup();
   }
 
-  /** Normalize duration_range or min_duration/max_duration into target (climate: hours). */
+  /** Climate duration limits (hours): fixed in code, not from dashboard config. */
+  static get CLIMATE_DURATION_MIN() { return 0.5; }
+  static get CLIMATE_DURATION_MAX() { return 12; }
+  static get CLIMATE_DURATION_STEP() { return 0.5; }
+
+  /** Normalize duration_range or min_duration/max_duration into target (climate: hours). Clamped to 0.5–12. */
   _normalizeDurationConfig(source, target) {
     if (!source || !target) return;
+    const minH = this.constructor.CLIMATE_DURATION_MIN;
+    const maxH = this.constructor.CLIMATE_DURATION_MAX;
     if (source.duration_range && Array.isArray(source.duration_range) && source.duration_range.length === 2) {
-      target.min_duration = source.duration_range[0];
-      target.max_duration = source.duration_range[1];
+      target.min_duration = Math.max(minH, Number(source.duration_range[0]) || minH);
+      target.max_duration = Math.min(maxH, Number(source.duration_range[1]) || maxH);
     } else {
-      target.min_duration = source.min_duration ?? 0.5;
-      target.max_duration = source.max_duration ?? 12;
+      target.min_duration = Math.max(minH, source.min_duration ?? minH);
+      target.max_duration = Math.min(maxH, source.max_duration ?? maxH);
     }
-    target.duration_step = source.duration_step ?? 0.5;
+    target.duration_step = source.duration_step ?? this.constructor.CLIMATE_DURATION_STEP;
   }
 
-  /** Duration config in hours: 0.5–12, step 0.5. Slider uses real hours (min..max). */
+  /** Duration config in hours: fixed 0.5–12, step 0.5 (same role as boiler _getDurationConfig but values hardcoded for climate). */
   _getDurationConfig() {
-    const minDuration = this._config?.min_duration ?? 0.5;
-    const maxDuration = this._config?.max_duration ?? 12;
-    const durationStep = this._config?.duration_step ?? 0.5;
+    const minDuration = this.constructor.CLIMATE_DURATION_MIN;
+    const maxDuration = this.constructor.CLIMATE_DURATION_MAX;
+    const durationStep = this.constructor.CLIMATE_DURATION_STEP;
     return { minDuration, maxDuration, durationStep };
   }
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.1]
+
+### Climate slots
+
+- Duration limits are fixed in code (0.5–12 h, step 0.5). Slider can no longer go to 0 or reset the add/edit form; config from the dashboard is ignored for min/max duration.
+
 ## [1.1.0]
 
 ### Climate cards

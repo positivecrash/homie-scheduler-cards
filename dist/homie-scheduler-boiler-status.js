@@ -1,9 +1,9 @@
 /**
  * Scheduler Boiler Status Card
- * Last build: 2026-03-04T17:42:12.840Z
- * Version: 1.1.0
+ * Last build: 2026-03-04T19:18:29.154Z
+ * Version: 1.1.1
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.0';
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.1';
 
 // Shared Components (auto-included from shared/)
 // Shared component: card-console-info/card-console-info.js
