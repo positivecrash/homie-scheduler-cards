@@ -1,6 +1,6 @@
 /**
  * Scheduler Boiler Status Card
- * Last build: 2026-03-04T19:18:29.154Z
+ * Last build: 2026-03-04T20:10:24.386Z
  * Version: 1.1.1
  */
 window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.1';

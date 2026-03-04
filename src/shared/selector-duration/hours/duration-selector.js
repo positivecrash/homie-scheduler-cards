@@ -76,6 +76,9 @@ if (typeof window.DurationSelector === 'undefined') {
     const newSlider = slider.cloneNode(true);
     input.parentNode.replaceChild(newInput, input);
     slider.parentNode.replaceChild(newSlider, slider);
+    newInput.min = HOURS_MIN;
+    newInput.max = HOURS_MAX;
+    newInput.step = String(HOURS_STEP);
     newSlider.min = HOURS_MIN;
     newSlider.max = HOURS_MAX;
     newSlider.step = String(HOURS_STEP);

@@ -1,6 +1,6 @@
 /**
  * Scheduler Climate Slots Card
- * Last build: 2026-03-04T19:18:29.252Z
+ * Last build: 2026-03-04T20:10:24.477Z
  * Version: 1.1.1
  */
 window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.1';
@@ -460,6 +460,9 @@ if (typeof window.DurationSelector === 'undefined') {
     const newSlider = slider.cloneNode(true);
     input.parentNode.replaceChild(newInput, input);
     slider.parentNode.replaceChild(newSlider, slider);
+    newInput.min = HOURS_MIN;
+    newInput.max = HOURS_MAX;
+    newInput.step = String(HOURS_STEP);
     newSlider.min = HOURS_MIN;
     newSlider.max = HOURS_MAX;
     newSlider.step = String(HOURS_STEP);
