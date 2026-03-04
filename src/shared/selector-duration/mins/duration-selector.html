@@ -1,0 +1,22 @@
+<!-- Duration Selector (minutes) - slider + number input -->
+<div class="duration-selector-wrapper">
+  <input 
+    type="range" 
+    class="duration-slider" 
+    data-action="update-duration-slider"
+    data-item-id="{{ITEM_ID}}"
+    min="{{DURATION_MIN}}"
+    max="{{DURATION_MAX}}"
+    value="{{DURATION_VALUE}}"
+  />
+  <input 
+    type="number" 
+    class="duration-input homie-input" 
+    data-action="update-duration"
+    data-item-id="{{ITEM_ID}}"
+    min="{{DURATION_MIN}}"
+    max="{{DURATION_MAX}}"
+    step="1"
+    value="{{DURATION_VALUE}}"
+  />
+</div>

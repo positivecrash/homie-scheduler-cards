@@ -1,4 +1,4 @@
-<!-- Duration Selector Component (universal - for popup and slot) -->
+<!-- Duration Selector (hours) - slider in real hours (min 0.5, max 12), like boiler -->
 <div class="duration-selector-wrapper">
   <input 
     type="range" 
@@ -7,7 +7,7 @@
     data-item-id="{{ITEM_ID}}"
     min="{{DURATION_MIN}}"
     max="{{DURATION_MAX}}"
-    step="{{DURATION_STEP}}"
+    step="0.5"
     value="{{DURATION_VALUE}}"
   />
   <input 
@@ -17,7 +17,7 @@
     data-item-id="{{ITEM_ID}}"
     min="{{DURATION_MIN}}"
     max="{{DURATION_MAX}}"
-    step="{{DURATION_STEP}}"
+    step="0.5"
     value="{{DURATION_VALUE}}"
   />
 </div>

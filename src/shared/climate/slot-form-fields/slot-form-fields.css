@@ -1,0 +1,282 @@
+/**
+ * Shared styles for slot-form-fields.html (Add Slot popup + Edit Slot).
+ * Uses :host CSS variables from the card (--_accent, --_text, etc.).
+ */
+
+.popup-field { margin-bottom: 20px; }
+.popup-field:last-child { margin-bottom: 0; }
+
+/* Shared form (add popup + edit slot) - one structure, same styles */
+.slot-form .slot-form-field { margin-bottom: 20px; }
+.slot-form .slot-form-field:last-child { margin-bottom: 0; }
+.slot-form .slot-form-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--_text);
+  margin-bottom: 8px;
+}
+.slot-form .slot-form-label ha-icon { --mdc-icon-size: 22px; color: var(--_accent); }
+
+/* Mode, Fan, Temp in one row */
+.slot-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+}
+.slot-form-row .slot-form-field {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.slot-form-row-mode-fan-temp .slot-form-field-mode,
+.slot-form-row-mode-fan-temp .slot-form-field-fan,
+.slot-form-row-mode-fan-temp .slot-form-field-temp {
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* stretch selects and inputs to full column width */
+.slot-form-row-mode-fan-temp .slot-form-field select,
+.slot-form-row-mode-fan-temp .slot-form-field input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+  display: block;
+}
+
+.slot-form-field-mode .slot-form-mode-select { width: 100%; box-sizing: border-box; }
+.slot-form-mode-warning {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--_error-color);
+  line-height: 1.4;
+}
+.slot-form-mode-warning:empty { display: none; }
+
+.slot-form-entities-wrap { position: relative; }
+.slot-form-entities-trigger {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 12px;
+  border-radius: var(--_radius-medium);
+  border: 1px solid var(--_divider);
+  background: var(--_bg-select);
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.slot-form-entities-trigger:hover,
+.slot-form-entities-trigger.open {
+  border-color: var(--_accent);
+  box-shadow: var(--_focus-ring);
+}
+.slot-form-entities-chips {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-height: 24px;
+}
+.popup-entity-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--_radius-small);
+  background: var(--_secondary-bg);
+  border: 1px solid var(--_divider);
+  font-size: 12px;
+  color: var(--_text);
+  white-space: nowrap;
+}
+.slot-form-entities-caret {
+  --mdc-icon-size: 20px;
+  color: var(--_text-secondary);
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+.slot-form-entities-trigger.open .slot-form-entities-caret {
+  transform: rotate(180deg);
+}
+.slot-form-entities-dropdown {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  z-index: 10;
+  flex-direction: column;
+  border-radius: var(--_radius-medium);
+  border: 1px solid var(--_divider);
+  background: var(--_popup-bg);
+  box-shadow: var(--_popup-box-shadow);
+  max-height: 220px;
+  overflow: hidden;
+}
+.slot-form-entities-dropdown.open {
+  display: flex;
+}
+.slot-form-entities-select-all-row {
+  border-bottom: 1px solid var(--_divider);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.slot-form-entity-row:hover {
+  background: var(--_secondary-bg);
+}
+.entities-selector-row.entities-selector-row-unsupported {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.entities-selector-row.entities-selector-row-unsupported .entities-selector-entity-name::after {
+  content: ' (not supported for this mode)';
+  font-size: 11px;
+  color: var(--_text-secondary);
+  font-weight: 400;
+}
+.slot-form-entities-dropdown .entities-selector-list {
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.slot-form-entities-dropdown .entities-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--_divider);
+  transition: background 0.2s;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.popup-entities-dropdown .entities-selector-row:last-child {
+  border-bottom: none;
+}
+.popup-entities-dropdown .entities-selector-row:hover {
+  background: var(--_secondary-bg);
+}
+.popup-entities-dropdown .entities-selector-row.hidden {
+  display: none;
+}
+.popup-entities-dropdown .entities-selector-row-unsupported {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.popup-entities-dropdown .entities-selector-row-unsupported .entities-selector-entity-name::after {
+  content: ' (not supported for this mode)';
+  font-size: 11px;
+  color: var(--_text-secondary);
+  font-weight: 400;
+}
+.popup-entity-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--_accent);
+  flex-shrink: 0;
+}
+.popup-entity-row ha-icon {
+  --mdc-icon-size: 22px;
+  color: var(--_text-secondary);
+  flex-shrink: 0;
+}
+.popup-entity-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--_text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popup-entities-list label {
+  cursor: pointer;
+}
+.popup-field label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--_text);
+}
+.popup-field label ha-icon { --mdc-icon-size: 24px; color: var(--_accent); }
+
+/* HA-style row: label left, control (e.g. ha-switch) right */
+.popup-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  gap: 16px;
+  cursor: pointer;
+}
+.popup-field-row-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--_text);
+  cursor: pointer;
+  margin: 0;
+  flex: 1;
+}
+.popup-field-row-label ha-icon {
+  --mdc-icon-size: 24px;
+  color: var(--_accent);
+}
+.popup-duration-row ha-switch,
+.slot-form-duration-enabled {
+  flex-shrink: 0;
+}
+.slot-form-duration-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  gap: 16px;
+  cursor: pointer;
+}
+.slot-form-field-row-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--_text);
+  cursor: pointer;
+  margin: 0;
+  flex: 1;
+}
+.slot-form-field-row-label ha-icon {
+  --mdc-icon-size: 24px;
+  color: var(--_accent);
+}
+/* Slot edit: same vertical layout as add (label on new line, then control) */
+.slot-expandable .slot-form .slot-form-field {
+  display: block;
+  font-size: 14px;
+}
+.slot-expandable .slot-form-title-input {
+  width: 100%;
+  box-sizing: border-box;
+}

@@ -9,6 +9,45 @@
 if (typeof window.ScheduleHelper === 'undefined') {
   window.ScheduleHelper = class ScheduleHelper {
   /**
+   * Escape string for safe use in HTML (prevents XSS when interpolating into innerHTML).
+   * @param {string} str - Raw string
+   * @returns {string} Escaped string
+   */
+  static escapeHtml(str) {
+    if (str == null || typeof str !== 'string') return '';
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Convert duration in hours to minutes (for climate card; API uses minutes).
+   * @param {number|null|string} hours - Duration in hours
+   * @returns {number|null} Minutes or null if invalid
+   */
+  static durationHoursToMinutes(hours) {
+    if (hours == null || hours === '') return null;
+    const h = parseFloat(hours);
+    if (Number.isNaN(h) || h < 0) return null;
+    return Math.round(h * 60);
+  }
+
+  /**
+   * Convert duration in minutes to hours (for climate card display).
+   * @param {number|null|string} minutes - Duration in minutes
+   * @returns {number|null} Hours or null if invalid
+   */
+  static durationMinutesToHours(minutes) {
+    if (minutes == null || minutes === '') return null;
+    const m = parseInt(minutes, 10);
+    if (Number.isNaN(m) || m < 0) return null;
+    return m / 60;
+  }
+
+  /**
    * Create slot data structure for add_item service
    * @param {Object} params - Slot parameters
    * @param {string} params.entity_id - Entity ID to control
@@ -40,7 +79,8 @@ if (typeof window.ScheduleHelper === 'undefined') {
     
     // Add duration only if specified (required for boiler, optional for climate)
     if (duration !== null && duration !== undefined && duration !== '') {
-      slotData.duration = parseInt(duration);
+      const d = parseInt(duration, 10);
+      if (!Number.isNaN(d) && d > 0) slotData.duration = d;
     }
     
     // Add service_end only if specified
@@ -83,16 +123,25 @@ if (typeof window.ScheduleHelper === 'undefined') {
    * Create service objects for climate entities
    * @param {string} entity_id - Entity ID
    * @param {string} hvac_mode - HVAC mode (e.g., "heat", "cool", "auto")
+   * @param {Object} [opts] - Optional: { temperature: number, fan_mode: string }
    * @returns {Object} Object with service_start and service_end for climate
    */
-  static createClimateServices(entity_id, hvac_mode) {
+  static createClimateServices(entity_id, hvac_mode, opts = {}) {
+    const value = {
+      entity_id: entity_id,
+      hvac_mode: hvac_mode
+    };
+    if (opts.temperature != null && opts.temperature !== '') {
+      const t = Number(opts.temperature);
+      if (!Number.isNaN(t)) value.temperature = t;
+    }
+    if (opts.fan_mode != null && opts.fan_mode !== '') {
+      value.fan_mode = opts.fan_mode;
+    }
     return {
       service_start: {
         name: "climate.set_hvac_mode",
-        value: {
-          entity_id: entity_id,
-          hvac_mode: hvac_mode
-        }
+        value: value
       },
       service_end: {
         name: "climate.set_hvac_mode",
@@ -142,7 +191,7 @@ if (typeof window.ScheduleHelper === 'undefined') {
         entity_id: bridgeSensor
       });
     } catch (e) {
-      // Ignore errors
+      if (typeof console !== 'undefined' && console.warn) console.warn('ScheduleHelper.forceSchedulerUpdate: update_entity failed', e);
     }
 
     // Wait for state to update from server, then trigger full re-render
@@ -154,7 +203,7 @@ if (typeof window.ScheduleHelper === 'undefined') {
             entity_id: bridgeSensor
           });
         } catch (e) {
-          // Ignore errors
+          if (typeof console !== 'undefined' && console.warn) console.warn('ScheduleHelper.forceSchedulerUpdate: update_entity (retry) failed', e);
         }
 
         // Trigger full re-render

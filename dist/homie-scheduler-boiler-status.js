@@ -1,9 +1,9 @@
 /**
  * Scheduler Boiler Status Card
- * Last build: 2026-02-17T15:04:39.373Z
- * Version: 1.0.6
+ * Last build: 2026-03-04T17:42:12.840Z
+ * Version: 1.1.0
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.6';
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.0';
 
 // Shared Components (auto-included from shared/)
 // Shared component: card-console-info/card-console-info.js
@@ -103,6 +103,45 @@ if (typeof window !== 'undefined') {
 if (typeof window.ScheduleHelper === 'undefined') {
   window.ScheduleHelper = class ScheduleHelper {
   /**
+   * Escape string for safe use in HTML (prevents XSS when interpolating into innerHTML).
+   * @param {string} str - Raw string
+   * @returns {string} Escaped string
+   */
+  static escapeHtml(str) {
+    if (str == null || typeof str !== 'string') return '';
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Convert duration in hours to minutes (for climate card; API uses minutes).
+   * @param {number|null|string} hours - Duration in hours
+   * @returns {number|null} Minutes or null if invalid
+   */
+  static durationHoursToMinutes(hours) {
+    if (hours == null || hours === '') return null;
+    const h = parseFloat(hours);
+    if (Number.isNaN(h) || h < 0) return null;
+    return Math.round(h * 60);
+  }
+
+  /**
+   * Convert duration in minutes to hours (for climate card display).
+   * @param {number|null|string} minutes - Duration in minutes
+   * @returns {number|null} Hours or null if invalid
+   */
+  static durationMinutesToHours(minutes) {
+    if (minutes == null || minutes === '') return null;
+    const m = parseInt(minutes, 10);
+    if (Number.isNaN(m) || m < 0) return null;
+    return m / 60;
+  }
+
+  /**
    * Create slot data structure for add_item service
    * @param {Object} params - Slot parameters
    * @param {string} params.entity_id - Entity ID to control
@@ -134,7 +173,8 @@ if (typeof window.ScheduleHelper === 'undefined') {
     
     // Add duration only if specified (required for boiler, optional for climate)
     if (duration !== null && duration !== undefined && duration !== '') {
-      slotData.duration = parseInt(duration);
+      const d = parseInt(duration, 10);
+      if (!Number.isNaN(d) && d > 0) slotData.duration = d;
     }
     
     // Add service_end only if specified
@@ -177,16 +217,25 @@ if (typeof window.ScheduleHelper === 'undefined') {
    * Create service objects for climate entities
    * @param {string} entity_id - Entity ID
    * @param {string} hvac_mode - HVAC mode (e.g., "heat", "cool", "auto")
+   * @param {Object} [opts] - Optional: { temperature: number, fan_mode: string }
    * @returns {Object} Object with service_start and service_end for climate
    */
-  static createClimateServices(entity_id, hvac_mode) {
+  static createClimateServices(entity_id, hvac_mode, opts = {}) {
+    const value = {
+      entity_id: entity_id,
+      hvac_mode: hvac_mode
+    };
+    if (opts.temperature != null && opts.temperature !== '') {
+      const t = Number(opts.temperature);
+      if (!Number.isNaN(t)) value.temperature = t;
+    }
+    if (opts.fan_mode != null && opts.fan_mode !== '') {
+      value.fan_mode = opts.fan_mode;
+    }
     return {
       service_start: {
         name: "climate.set_hvac_mode",
-        value: {
-          entity_id: entity_id,
-          hvac_mode: hvac_mode
-        }
+        value: value
       },
       service_end: {
         name: "climate.set_hvac_mode",
@@ -236,7 +285,7 @@ if (typeof window.ScheduleHelper === 'undefined') {
         entity_id: bridgeSensor
       });
     } catch (e) {
-      // Ignore errors
+      if (typeof console !== 'undefined' && console.warn) console.warn('ScheduleHelper.forceSchedulerUpdate: update_entity failed', e);
     }
 
     // Wait for state to update from server, then trigger full re-render
@@ -248,7 +297,7 @@ if (typeof window.ScheduleHelper === 'undefined') {
             entity_id: bridgeSensor
           });
         } catch (e) {
-          // Ignore errors
+          if (typeof console !== 'undefined' && console.warn) console.warn('ScheduleHelper.forceSchedulerUpdate: update_entity (retry) failed', e);
         }
 
         // Trigger full re-render
@@ -330,21 +379,15 @@ if (typeof window.ScheduleHelper === 'undefined') {
   // Already assigned to window.ScheduleHelper above, no need to reassign
 }
 
-// Shared component: selector-duration/duration-selector.js
+// Shared component: selector-duration/mins/duration-selector.js
 /**
- * Duration Selector Utility
- * 
- * Shared utility for duration selection with slider and number input.
- * Used by both boiler and climate schedule cards.
+ * Duration Selector (minutes)
+ * Slider + number input, duration in minutes. Used by boiler schedule card.
  */
 
 // Prevent duplicate class declaration when multiple cards are loaded
 if (typeof window.DurationSelector === 'undefined') {
   window.DurationSelector = class DurationSelector {
-  /**
-   * Compute step so the slider can reach max (step must divide range).
-   * Picks a divisor of (max - min) closest to preferredStep.
-   */
   static computeStep(min, max, preferredStep = 15) {
     const range = max - min;
     if (range <= 0) return 1;
@@ -362,15 +405,6 @@ if (typeof window.DurationSelector === 'undefined') {
     return best;
   }
 
-  /**
-   * Build list of allowed duration values: multiples of stepBase (5) from min up to max,
-   * plus max itself if it's not a multiple of 5 (e.g. 66, 69, 63).
-   * Example: min=5, max=66 → [5,10,15,...,60,65,66]; max=63 → [5,10,...,60,63].
-   * @param {number} min - Minimum value
-   * @param {number} max - Maximum value
-   * @param {number} stepBase - Base step for "nice" values (default 5)
-   * @returns {number[]} Allowed values; slider will use index into this array
-   */
   static computeAllowedValues(min, max, stepBase = 5) {
     if (max < min) return [min];
     const list = [];
@@ -384,41 +418,26 @@ if (typeof window.DurationSelector === 'undefined') {
     return list;
   }
 
-  /**
-   * Get selected duration value
-   * @param {HTMLElement} shadowRoot - Shadow root of the card or container element
-   * @returns {number|null} Duration in minutes, or null if no duration
-   */
   static getSelectedDuration(shadowRoot) {
-    // Check if shadowRoot itself is the wrapper (when called with wrapper element directly)
     let wrapper = null;
     if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
       wrapper = shadowRoot;
     } else {
-      // Find wrapper inside shadowRoot
       wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
     }
-    
     if (wrapper) {
-      // Find input in the same wrapper as slider (they are siblings)
       const input = wrapper.querySelector('[data-action="update-duration"]');
       if (input) {
         const value = input.value;
         return value && value !== '' ? parseInt(value) : null;
       }
     }
-    // Fallback: search in shadowRoot
     const input = shadowRoot.querySelector('[data-action="update-duration"]');
     if (!input) return null;
     const value = input.value;
     return value && value !== '' ? parseInt(value) : null;
   }
 
-  /**
-   * Set duration value (syncs both slider and input)
-   * @param {HTMLElement} shadowRoot - Shadow root of the card or container element
-   * @param {number|null} duration - Duration in minutes, or null to clear
-   */
   static setSelectedDuration(shadowRoot, duration) {
     const wrapper = shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')
       ? shadowRoot
@@ -429,101 +448,48 @@ if (typeof window.DurationSelector === 'undefined') {
       input.value = duration != null && duration !== '' ? String(duration) : '';
     }
     if (slider) {
-      const valuesStr = wrapper && wrapper.dataset.durationValues;
-      const allowedValues = valuesStr ? valuesStr.split(',').map(Number) : null;
-      if (allowedValues && allowedValues.length && duration != null && duration !== '') {
-        const d = parseInt(duration, 10);
-        let idx = allowedValues.indexOf(d);
-        if (idx < 0) {
-          idx = allowedValues.reduce((best, _, i) =>
-            Math.abs(allowedValues[i] - d) < Math.abs(allowedValues[best] - d) ? i : best, 0);
-        }
-        slider.value = String(idx);
-      } else {
-        slider.value = duration != null && duration !== '' ? String(duration) : '';
-      }
+      slider.value = duration != null && duration !== '' ? String(duration) : '';
     }
   }
 
-  /**
-   * Reset duration selector to default value
-   * @param {HTMLElement} shadowRoot - Shadow root of the card
-   * @param {number|null} defaultDuration - Default duration (30 for boiler, null for climate)
-   */
   static reset(shadowRoot, defaultDuration = 30) {
     this.setSelectedDuration(shadowRoot, defaultDuration);
   }
 
-  /**
-   * Attach event listeners to sync slider and input
-   * @param {HTMLElement} shadowRoot - Shadow root of the card or container element
-   */
   static attachEventListeners(shadowRoot) {
-    // Check if shadowRoot itself is the wrapper (when called with wrapper element directly)
     let wrapper = null;
     if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
       wrapper = shadowRoot;
     } else {
-      // Find wrapper inside shadowRoot
       wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
     }
-    
     if (!wrapper) return;
-    
-    // Find input and slider in the same wrapper (they are siblings)
     const input = wrapper.querySelector('[data-action="update-duration"]');
     const slider = wrapper.querySelector('[data-action="update-duration-slider"]');
-    
     if (!input || !slider) return;
-    
     const newInput = input.cloneNode(true);
     const newSlider = slider.cloneNode(true);
     input.parentNode.replaceChild(newInput, input);
     slider.parentNode.replaceChild(newSlider, slider);
-    
-    const valuesStr = wrapper.dataset.durationValues;
-    const allowedValues = valuesStr ? valuesStr.split(',').map(Number) : null;
+    const minVal = parseInt(newInput.min, 10) || 0;
+    const maxVal = parseInt(newInput.max, 10) || 1440;
+    newSlider.min = minVal;
+    newSlider.max = maxVal;
     let currentValue = parseInt(newInput.value, 10);
-    if (isNaN(currentValue) && allowedValues && allowedValues.length) currentValue = allowedValues[0];
-    if (allowedValues && allowedValues.length) {
-      let idx = allowedValues.indexOf(currentValue);
-      if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
-        Math.abs(allowedValues[i] - currentValue) < Math.abs(allowedValues[best] - currentValue) ? i : best, 0);
-      newSlider.value = String(idx);
-      newInput.value = String(allowedValues[idx]);
-    }
-    
+    if (!isNaN(currentValue)) newSlider.value = String(currentValue);
     const sliderInputHandler = (e) => {
       const raw = parseInt(e.target.value, 10);
-      if (allowedValues && allowedValues.length) {
-        currentValue = allowedValues[Math.min(raw, allowedValues.length - 1)];
-        newInput.value = String(currentValue);
-      } else {
-        currentValue = raw;
-        newInput.value = String(currentValue);
-      }
+      currentValue = raw;
+      newInput.value = String(currentValue);
       newInput.setAttribute('value', newInput.value);
     };
     newSlider.addEventListener('input', sliderInputHandler);
     newSlider.addEventListener('change', sliderInputHandler);
-    
     const inputChangeHandler = (e) => {
       const value = parseInt(e.target.value, 10);
-      const min = parseInt(newInput.min, 10) || 0;
-      const max = parseInt(newInput.max, 10) || 1440;
       if (!isNaN(value)) {
-        const clamped = Math.max(min, Math.min(max, value));
-        currentValue = clamped;
-        newInput.value = String(clamped);
-        newInput.setAttribute('value', String(clamped));
-        if (allowedValues && allowedValues.length) {
-          let idx = allowedValues.indexOf(clamped);
-          if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
-            Math.abs(allowedValues[i] - clamped) < Math.abs(allowedValues[best] - clamped) ? i : best, 0);
-          newSlider.value = String(idx);
-        } else {
-          newSlider.value = String(clamped);
-        }
+        currentValue = value;
+        newSlider.value = String(value);
         newSlider.setAttribute('value', newSlider.value);
       }
     };
@@ -533,156 +499,94 @@ if (typeof window.DurationSelector === 'undefined') {
     newSlider.addEventListener('click', (e) => e.stopPropagation());
   }
 
-  /**
-   * Get duration select element from a slot card
-   * @param {HTMLElement} slotCard - The slot card element
-   * @returns {HTMLElement|null} The duration input element
-   */
   static getInputFromSlot(slotCard) {
     return slotCard.querySelector('[data-action="update-duration"]');
   }
 
-  /**
-   * Set duration value in a slot card
-   * @param {HTMLElement} slotCard - The slot card element
-   * @param {number|null} duration - Duration in minutes, or null
-   * @param {Object} config - Optional config with min_duration, max_duration, duration_step
-   */
   static setDurationInSlot(slotCard, duration, config = null) {
     const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
       ? slotCard
       : slotCard.querySelector('.duration-selector-wrapper');
     const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
     const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
-    
     if (config && (input || slider)) {
       const minDuration = config.min_duration || 15;
       const maxDuration = config.max_duration || 1440;
-      const allowedValues = this.computeAllowedValues(minDuration, maxDuration, 5);
-      if (wrapper) wrapper.dataset.durationValues = allowedValues.join(',');
       if (input) {
         input.min = minDuration;
         input.max = maxDuration;
         input.step = 1;
       }
       if (slider) {
-        slider.min = 0;
-        slider.max = Math.max(0, allowedValues.length - 1);
-        slider.step = 1;
+        slider.min = minDuration;
+        slider.max = maxDuration;
       }
     }
-    
     if (input) {
       input.value = duration != null && duration !== '' ? String(duration) : '';
     }
-    if (slider && wrapper && wrapper.dataset.durationValues) {
-      const allowedValues = wrapper.dataset.durationValues.split(',').map(Number);
-      const d = parseInt(duration, 10);
-      if (!isNaN(d)) {
-        let idx = allowedValues.indexOf(d);
-        if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
-          Math.abs(allowedValues[i] - d) < Math.abs(allowedValues[best] - d) ? i : best, 0);
-        slider.value = String(idx);
-      } else {
-        slider.value = '0';
-      }
-    } else if (slider) {
+    if (slider) {
       slider.value = duration != null && duration !== '' ? String(duration) : '';
     }
   }
 
-  /**
-   * Attach event listeners for duration selector in a slot card
-   * @param {HTMLElement} slotCard - The slot card element
-   * @param {Function} onChangeCallback - Callback function when duration changes (receives duration value)
-   * @param {Object} config - Optional config with min_duration, max_duration, duration_step
-   */
   static attachEventListenersInSlot(slotCard, onChangeCallback, config = null) {
     const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
       ? slotCard
       : slotCard.querySelector('.duration-selector-wrapper');
     const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
     const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
-    
     if (config && input && slider) {
       const minDuration = config.min_duration || 15;
       const maxDuration = config.max_duration || 1440;
-      const allowedValues = this.computeAllowedValues(minDuration, maxDuration, 5);
-      if (wrapper) wrapper.dataset.durationValues = allowedValues.join(',');
       input.min = minDuration;
       input.max = maxDuration;
       input.step = 1;
-      slider.min = 0;
-      slider.max = Math.max(0, allowedValues.length - 1);
-      slider.step = 1;
+      slider.min = minDuration;
+      slider.max = maxDuration;
     }
-    
     if (input && slider) {
       const newInput = input.cloneNode(true);
       const newSlider = slider.cloneNode(true);
       input.parentNode.replaceChild(newInput, input);
       slider.parentNode.replaceChild(newSlider, slider);
-      
-      const valuesStr = wrapper && wrapper.dataset.durationValues;
-      const allowedValues = valuesStr ? valuesStr.split(',').map(Number) : null;
+      const minVal = parseInt(newInput.min, 10) || 0;
+      const maxVal = parseInt(newInput.max, 10) || 1440;
+      newSlider.min = minVal;
+      newSlider.max = maxVal;
       let currentValue = parseInt(newInput.value, 10);
-      if (isNaN(currentValue) && allowedValues && allowedValues.length) currentValue = allowedValues[0];
-      if (allowedValues && allowedValues.length) {
-        let idx = allowedValues.indexOf(currentValue);
-        if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
-          Math.abs(allowedValues[i] - currentValue) < Math.abs(allowedValues[best] - currentValue) ? i : best, 0);
-        newSlider.value = String(idx);
-        newInput.value = String(allowedValues[idx]);
-      }
-      
+      if (!isNaN(currentValue)) newSlider.value = String(currentValue);
       const sliderHandler = (e) => {
         const raw = parseInt(e.target.value, 10);
-        if (allowedValues && allowedValues.length) {
-          currentValue = allowedValues[Math.min(raw, allowedValues.length - 1)];
-          newInput.value = String(currentValue);
-        } else {
-          currentValue = raw;
-          newInput.value = String(currentValue);
-        }
+        currentValue = raw;
+        newInput.value = String(currentValue);
         newInput.setAttribute('value', newInput.value);
         if (onChangeCallback) onChangeCallback(currentValue);
       };
-      
       const inputHandler = (e) => {
         const value = parseInt(e.target.value, 10);
-        const min = parseInt(newInput.min, 10) || 0;
-        const max = parseInt(newInput.max, 10) || 1440;
         if (!isNaN(value)) {
-          const clamped = Math.max(min, Math.min(max, value));
-          currentValue = clamped;
-          newInput.value = String(clamped);
-          newInput.setAttribute('value', String(clamped));
-          if (allowedValues && allowedValues.length) {
-            let idx = allowedValues.indexOf(clamped);
-            if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
-              Math.abs(allowedValues[i] - clamped) < Math.abs(allowedValues[best] - clamped) ? i : best, 0);
-            newSlider.value = String(idx);
-          } else {
-            newSlider.value = String(clamped);
-          }
+          currentValue = value;
+          newSlider.value = String(value);
           newSlider.setAttribute('value', newSlider.value);
-          if (onChangeCallback) onChangeCallback(currentValue);
-        } else if (e.target.value === '') {
-          if (onChangeCallback) onChangeCallback(null);
         }
       };
-      
+      const blurHandler = () => {
+        if (!isNaN(currentValue)) {
+          newInput.value = String(currentValue);
+          newInput.setAttribute('value', newInput.value);
+          if (onChangeCallback) onChangeCallback(currentValue);
+        }
+      };
       newSlider.addEventListener('input', sliderHandler);
       newSlider.addEventListener('change', sliderHandler);
       newInput.addEventListener('input', inputHandler);
-      newInput.addEventListener('change', inputHandler);
+      newInput.addEventListener('blur', blurHandler);
       newInput.addEventListener('click', (e) => e.stopPropagation());
       newSlider.addEventListener('click', (e) => e.stopPropagation());
     }
   }
   };
-  
-  // Already assigned to window.DurationSelector above, no need to reassign
 }
 
 // Shared component: selector-weekday/weekday-selector.js
@@ -752,8 +656,8 @@ if (typeof window.WeekdaySelector === 'undefined') {
       day.classList.remove('active');
     });
 
-    // Hide custom weekdays selector (everyday is default)
-    const customWeekdays = shadowRoot.getElementById('popup-weekdays-custom');
+    // Hide custom weekdays selector (everyday is default); use querySelector so scope can be shadowRoot or a container (e.g. add popup form)
+    const customWeekdays = shadowRoot.querySelector ? shadowRoot.querySelector('#popup-weekdays-custom') : (shadowRoot.getElementById ? shadowRoot.getElementById('popup-weekdays-custom') : null);
     if (customWeekdays) customWeekdays.classList.add('hidden');
   }
 
@@ -970,14 +874,18 @@ class HomieBoilerStatusCard extends HTMLElement {
           ).then((unsubscribeFn) => {
             this._unsubStateChanged = unsubscribeFn;
           }).catch((e) => {
+            if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler status): subscribeStateChanged failed', e);
           });
         } catch (e) {
+          if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler status): subscribeStateChanged setup failed', e);
         }
       }
       
       // Re-render on state changes
       this.render().catch(err => {});
-    } catch (err) {}
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler status): hass setter failed', err);
+    }
   }
 
   get hass() {
@@ -1173,6 +1081,7 @@ class HomieBoilerStatusCard extends HTMLElement {
       try {
         this._unsubStateChanged();
       } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler status): unsubscribe in disconnectedCallback failed', e);
       }
       this._unsubStateChanged = null;
     }
@@ -1228,7 +1137,9 @@ class HomieBoilerStatusCard extends HTMLElement {
         this._entryId = firstBridgeSensor.entryId;
         return;
       }
-    } catch (err) {}
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler status): _findBridgeSensor failed', err);
+    }
   }
 
   _getBridgeState() {
@@ -1338,6 +1249,7 @@ class HomieBoilerStatusCard extends HTMLElement {
     return candidates;
   }
 
+  /** Turn-off time for subtitle: (1) integration (slot end or entity_max_runtime) if present; (2) else if run started by button — button timer. */
   _getTurnOffTime() {
     try {
       const bridgeState = this._getBridgeState();
@@ -1346,43 +1258,43 @@ class HomieBoilerStatusCard extends HTMLElement {
       const entityId = this._config?.entity;
       if (!entityId) return null;
 
-      const activeButtons = bridgeState.attributes?.active_buttons || {};
-      const activeButton = activeButtons[entityId];
-
-      // Priority 1: active_buttons (from button card set_active_button)
-      if (activeButton && activeButton.timer_end) {
-        let timerEnd = parseInt(activeButton.timer_end, 10);
-        if (!isNaN(timerEnd)) {
-          if (timerEnd > 0 && timerEnd < 1e12) timerEnd *= 1000; // seconds → ms
-          const d = new Date(timerEnd);
-          if (d > new Date()) return d;
-        }
-      }
-
-      // Collect all valid turn-off times; boiler turns off at the earliest
+      const entityState = this._getEntityState();
       const now = new Date();
       const candidates = [];
 
-      // max_runtime_turn_off_times from ALL bridge sensors (multiple instances → take min)
+      // 1) Integration first: slot end or entity_max_runtime (so slot-driven runs show slot time, not button)
       const bridgeCandidates = this._getAllTurnOffCandidatesFromBridges();
       candidates.push(...bridgeCandidates);
 
-      // Fallback: entity.last_changed + max_runtime (only when integration hasn't provided turn-off time)
-      const hasTurnOffFromIntegration = candidates.length > 0;
-      if (!hasTurnOffFromIntegration) {
-        const entityMaxRuntime = bridgeState.attributes?.entity_max_runtime || {};
-        const maxMinutes = entityMaxRuntime[entityId];
-        if (maxMinutes != null && Number(maxMinutes) > 0) {
-          const entityState = this._getEntityState();
-          if (entityState && entityState.state === 'on' && entityState.last_changed) {
-            const lastChanged = new Date(entityState.last_changed).getTime();
-            const d = new Date(lastChanged + Number(maxMinutes) * 60 * 1000);
-            if (d > now) candidates.push(d.getTime());
+      if (candidates.length > 0) return new Date(Math.min(...candidates));
+
+      // 2) Fallback: entity_max_runtime for this entity only
+      const entityMaxRuntime = bridgeState.attributes?.entity_max_runtime || {};
+      const maxMinutes = entityMaxRuntime[entityId];
+      if (maxMinutes != null && Number(maxMinutes) > 0 && entityState?.state === 'on' && entityState.last_changed) {
+        const lastChanged = new Date(entityState.last_changed).getTime();
+        const d = new Date(lastChanged + Number(maxMinutes) * 60 * 1000);
+        if (d > now) return d;
+      }
+
+      // 3) If run was started by the button card — show button's timer
+      const activeButtons = bridgeState.attributes?.active_buttons || {};
+      const activeButton = activeButtons[entityId];
+      if (activeButton?.timer_end && entityState?.state === 'on' && entityState.last_changed) {
+        let timerEnd = parseInt(activeButton.timer_end, 10);
+        if (!isNaN(timerEnd)) {
+          if (timerEnd > 0 && timerEnd < 1e12) timerEnd *= 1000;
+          const durationMin = (activeButton.duration != null) ? Number(activeButton.duration) : 0;
+          if (durationMin > 0) {
+            const buttonStartMs = timerEnd - durationMin * 60 * 1000;
+            const lastChangedMs = new Date(entityState.last_changed).getTime();
+            if (lastChangedMs <= buttonStartMs + 5000) {
+              const d = new Date(timerEnd);
+              if (d > now) return d;
+            }
           }
         }
       }
-
-      if (candidates.length > 0) return new Date(Math.min(...candidates));
 
       return null;
     } catch (err) {
@@ -1545,13 +1457,16 @@ class HomieBoilerStatusCard extends HTMLElement {
     }
   }
 
-  _formatTimeUntil(date) {
+  /** @param {Date} date - target time
+   *  @param {number} [maxMs] - cap displayed countdown (e.g. entity_max_runtime) so it never exceeds limit when device clock is wrong */
+  _formatTimeUntil(date, maxMs) {
     if (!date) return '';
     
     try {
       const now = Date.now();
       const targetTime = date.getTime();
-      const diffMs = targetTime - now;
+      let diffMs = targetTime - now;
+      if (maxMs != null && maxMs > 0 && diffMs > maxMs) diffMs = maxMs;
       
       if (diffMs <= 0) return 'now';
       
@@ -1597,13 +1512,19 @@ class HomieBoilerStatusCard extends HTMLElement {
     
     // Entity is on (turn-off time from integration: slot duration, button, or max_runtime)
     if (turnOffTime) {
-      const timeUntil = this._formatTimeUntil(turnOffTime);
+      const bridgeState = this._getBridgeState();
+      const entityMaxRuntime = bridgeState?.attributes?.entity_max_runtime || {};
+      const maxMinutes = entityMaxRuntime[this._config?.entity];
+      const maxMs = (maxMinutes != null && Number(maxMinutes) > 0)
+        ? Number(maxMinutes) * 60 * 1000
+        : undefined;
+      const timeUntil = this._formatTimeUntil(turnOffTime, maxMs);
       // If time is in the past, bridge may not have updated yet — refresh to get new slot end
       if (timeUntil === 'now') {
         this._scheduleCountdownRefresh();
         return 'Runs, updating…';
       }
-      return `Runs, will be off in ${timeUntil}`;
+      return `Runs, Will be off in ${timeUntil}`;
     }
     
     // Entity is on but no turn-off time from integration
@@ -1636,6 +1557,10 @@ class HomieBoilerStatusCard extends HTMLElement {
     }
   }
 
+  /**
+   * Toggle (click on status icon): no max time is applied from button/slots cards.
+   * Only integration "Max run time" for this entity (if set in integration options) applies.
+   */
   async _toggleEntity() {
     if (!this._hass || !this._config || !this._config.entity) return;
     
@@ -1643,28 +1568,25 @@ class HomieBoilerStatusCard extends HTMLElement {
       const isOn = this._isEntityOn();
       
       if (isOn) {
-        // Turning off - clear any active timer
         if (this._turnOffTimer) {
           clearTimeout(this._turnOffTimer);
           this._turnOffTimer = null;
         }
-        
-        // Clear active button marker in integration
         if (this._entryId) {
           try {
-            await this._callService('clear_active_button', {
-              entity_id: this._config.entity
-            });
-          } catch (e) {
-            // Ignore errors
-          }
+            await this._callService('clear_active_button', { entity_id: this._config.entity });
+          } catch (e) { /* ignore */ }
         }
-        
         await this._hass.callService('switch', 'turn_off', {
           entity_id: this._config.entity
         });
       } else {
-        // Turning on – just turn on (turn-off is from button card duration or integration max_runtime)
+        // Turn on: clear button state so integration/slot controls turn-off (entity_max_runtime or slot)
+        if (this._entryId) {
+          try {
+            await this._callService('clear_active_button', { entity_id: this._config.entity });
+          } catch (e) { /* ignore */ }
+        }
         await this._hass.callService('switch', 'turn_on', {
           entity_id: this._config.entity
         });
@@ -1680,7 +1602,7 @@ class HomieBoilerStatusCard extends HTMLElement {
         }
       }, 100);
     } catch (err) {
-      alert('Failed to toggle switch: ' + (err.message || err));
+      console.warn('Homie Scheduler (boiler status): Failed to toggle switch', err.message || err, err);
     }
   }
 
@@ -1752,7 +1674,7 @@ class HomieBoilerStatusCard extends HTMLElement {
       const fontLink = isDevMode ? 
         '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@latest/css/materialdesignicons.min.css">' : '';
       
-      const styleContent = `/**\n * Boiler Status Card - Styles\n * \n * Card showing boiler status with icon in circle\n */\n\n:host {\n  display: block;\n  \n  /* Status card design tokens - с возможностью переопределения */\n  --_accent: var(--homie-status-accent, var(--state-switch-on-color, var(--warning-color, #ffc107)));\n  --_bg: var(--homie-status-bg, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_radius: var(--homie-status-radius, var(--ha-card-border-radius, 4px));\n  --_shadow: var(--homie-status-shadow, var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1)));\n  \n  --_text: var(--homie-status-text, var(--primary-text-color, #212121));\n  --_text-secondary: var(--homie-status-text-secondary, var(--secondary-text-color, #757575));\n  --_text-on-accent: var(--homie-status-text-on-accent, var(--text-primary-on-background, #ffffff));\n  \n  --_disabled-color: var(--homie-status-disabled, var(--disabled-color, var(--disabled-text-color, #9e9e9e)));\n}\n\n.status-card {\n  display: flex;\n  align-items: center;\n  gap: 16px;\n  padding: 16px;\n  border-radius: var(--ha-card-border-radius, 4px);\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  box-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1));\n}\n\n.icon-button {\n  flex-shrink: 0;\n  width: 64px;\n  height: 64px;\n  padding: 0;\n  border: none;\n  background: transparent;\n  cursor: pointer;\n  border-radius: 50%;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: transform 0.2s ease, opacity 0.2s ease;\n}\n\n.icon-button:active:not(.disabled) {\n  transform: scale(0.95);\n}\n\n.icon-button.disabled {\n  cursor: not-allowed;\n  opacity: 0.5;\n}\n\n.icon-circle {\n  width: 64px;\n  height: 64px;\n  border-radius: 50%;\n  background: var(--disabled-color, var(--disabled-text-color, #9e9e9e));\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: background-color 0.2s ease;\n}\n\n.icon-button.active .icon-circle {\n  background: var(--state-switch-on-color, var(--warning-color, #ffc107));\n}\n\n.status-icon {\n  color: var(--text-primary-on-background, #ffffff);\n  --mdc-icon-size: 32px;\n}\n\n.content {\n  flex: 1;\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n  min-width: 0; /* Allow text truncation */\n}\n\n.title {\n  font-size: 16px;\n  font-weight: 500;\n  color: var(--primary-text-color, #212121);\n  line-height: 1.2;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n\n.subtitle {\n  font-size: 12px;\n  line-height: 1;\n  color: var(--secondary-text-color, #757575);\n}\n\n.max-time.max-time-hidden {\n  display: none;\n}\n\n.last-run.last-run-hidden {\n  display: none;\n}\n`;
+      const styleContent = `/**\n * Shared styles for slot-form-fields.html (Add Slot popup + Edit Slot).\n * Uses :host CSS variables from the card (--_accent, --_text, etc.).\n */\n\n.popup-field { margin-bottom: 20px; }\n.popup-field:last-child { margin-bottom: 0; }\n\n/* Shared form (add popup + edit slot) - one structure, same styles */\n.slot-form .slot-form-field { margin-bottom: 20px; }\n.slot-form .slot-form-field:last-child { margin-bottom: 0; }\n.slot-form .slot-form-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  margin-bottom: 8px;\n}\n.slot-form .slot-form-label ha-icon { --mdc-icon-size: 22px; color: var(--_accent); }\n\n/* Mode, Fan, Temp in one row */\n.slot-form-row {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 12px 16px;\n  align-items: flex-end;\n  margin-bottom: 20px;\n}\n.slot-form-row .slot-form-field {\n  flex: 1;\n  min-width: 0;\n  margin-bottom: 0;\n}\n.slot-form-row-mode-fan-temp .slot-form-field-mode,\n.slot-form-row-mode-fan-temp .slot-form-field-fan,\n.slot-form-row-mode-fan-temp .slot-form-field-temp {\n  flex: 1 1 0;\n  min-width: 0;\n}\n/* stretch selects and inputs to full column width */\n.slot-form-row-mode-fan-temp .slot-form-field select,\n.slot-form-row-mode-fan-temp .slot-form-field input[type="number"] {\n  width: 100%;\n  box-sizing: border-box;\n  display: block;\n}\n\n.slot-form-field-mode .slot-form-mode-select { width: 100%; box-sizing: border-box; }\n.slot-form-mode-warning {\n  margin-top: 8px;\n  font-size: 12px;\n  color: var(--_error-color);\n  line-height: 1.4;\n}\n.slot-form-mode-warning:empty { display: none; }\n\n.slot-form-entities-wrap { position: relative; }\n.slot-form-entities-trigger {\n  margin-top: 8px;\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  min-height: 40px;\n  padding: 6px 12px;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_bg-select);\n  cursor: pointer;\n  transition: border-color 0.2s, box-shadow 0.2s;\n}\n.slot-form-entities-trigger:hover,\n.slot-form-entities-trigger.open {\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.slot-form-entities-chips {\n  flex: 1;\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n  align-items: center;\n  min-height: 24px;\n}\n.popup-entity-chip {\n  display: inline-flex;\n  align-items: center;\n  padding: 2px 8px;\n  border-radius: var(--_radius-small);\n  background: var(--_secondary-bg);\n  border: 1px solid var(--_divider);\n  font-size: 12px;\n  color: var(--_text);\n  white-space: nowrap;\n}\n.slot-form-entities-caret {\n  --mdc-icon-size: 20px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n  transition: transform 0.2s;\n}\n.slot-form-entities-trigger.open .slot-form-entities-caret {\n  transform: rotate(180deg);\n}\n.slot-form-entities-dropdown {\n  display: none;\n  position: absolute;\n  left: 0;\n  right: 0;\n  top: 100%;\n  margin-top: 4px;\n  z-index: 10;\n  flex-direction: column;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_popup-bg);\n  box-shadow: var(--_popup-box-shadow);\n  max-height: 220px;\n  overflow: hidden;\n}\n.slot-form-entities-dropdown.open {\n  display: flex;\n}\n.slot-form-entities-select-all-row {\n  border-bottom: 1px solid var(--_divider);\n  flex-shrink: 0;\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  padding: 10px 16px;\n  cursor: pointer;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.slot-form-entity-row:hover {\n  background: var(--_secondary-bg);\n}\n.entities-selector-row.entities-selector-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.entities-selector-row.entities-selector-row-unsupported .entities-selector-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n.slot-form-entities-dropdown .entities-selector-list {\n  overflow-y: auto;\n  overflow-x: hidden;\n  display: flex;\n  flex-direction: column;\n  flex: 1;\n  min-height: 0;\n}\n.slot-form-entities-dropdown .entities-selector-row {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  padding: 10px 16px;\n  cursor: pointer;\n  border-bottom: 1px solid var(--_divider);\n  transition: background 0.2s;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.popup-entities-dropdown .entities-selector-row:last-child {\n  border-bottom: none;\n}\n.popup-entities-dropdown .entities-selector-row:hover {\n  background: var(--_secondary-bg);\n}\n.popup-entities-dropdown .entities-selector-row.hidden {\n  display: none;\n}\n.popup-entities-dropdown .entities-selector-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.popup-entities-dropdown .entities-selector-row-unsupported .entities-selector-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n.popup-entity-row input[type="checkbox"] {\n  width: 18px;\n  height: 18px;\n  margin: 0;\n  cursor: pointer;\n  accent-color: var(--_accent);\n  flex-shrink: 0;\n}\n.popup-entity-row ha-icon {\n  --mdc-icon-size: 22px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n}\n.popup-entity-name {\n  flex: 1;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.popup-entities-list label {\n  cursor: pointer;\n}\n.popup-field label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  margin-bottom: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n}\n.popup-field label ha-icon { --mdc-icon-size: 24px; color: var(--_accent); }\n\n/* HA-style row: label left, control (e.g. ha-switch) right */\n.popup-field-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 8px 0;\n  gap: 16px;\n  cursor: pointer;\n}\n.popup-field-row-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  cursor: pointer;\n  margin: 0;\n  flex: 1;\n}\n.popup-field-row-label ha-icon {\n  --mdc-icon-size: 24px;\n  color: var(--_accent);\n}\n.popup-duration-row ha-switch,\n.slot-form-duration-enabled {\n  flex-shrink: 0;\n}\n.slot-form-duration-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 8px 0;\n  gap: 16px;\n  cursor: pointer;\n}\n.slot-form-field-row-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  cursor: pointer;\n  margin: 0;\n  flex: 1;\n}\n.slot-form-field-row-label ha-icon {\n  --mdc-icon-size: 24px;\n  color: var(--_accent);\n}\n/* Slot edit: same vertical layout as add (label on new line, then control) */\n.slot-expandable .slot-form .slot-form-field {\n  display: block;\n  font-size: 14px;\n}\n.slot-expandable .slot-form-title-input {\n  width: 100%;\n  box-sizing: border-box;\n}\n\n/**\n * Boiler Status Card - Styles\n * \n * Card showing boiler status with icon in circle\n */\n\n:host {\n  display: block;\n  \n  /* Status card design tokens - с возможностью переопределения */\n  --_accent: var(--homie-status-accent, var(--state-switch-on-color, var(--warning-color, #ffc107)));\n  --_bg: var(--homie-status-bg, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_radius: var(--homie-status-radius, var(--ha-card-border-radius, 4px));\n  --_shadow: var(--homie-status-shadow, var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1)));\n  \n  --_text: var(--homie-status-text, var(--primary-text-color, #212121));\n  --_text-secondary: var(--homie-status-text-secondary, var(--secondary-text-color, #757575));\n  --_text-on-accent: var(--homie-status-text-on-accent, var(--text-primary-on-background, #ffffff));\n  \n  --_disabled-color: var(--homie-status-disabled, var(--disabled-color, var(--disabled-text-color, #9e9e9e)));\n}\n\n.status-card {\n  display: flex;\n  align-items: center;\n  gap: 16px;\n  padding: 16px;\n  border-radius: var(--ha-card-border-radius, 4px);\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  box-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1));\n}\n\n.icon-button {\n  flex-shrink: 0;\n  width: 64px;\n  height: 64px;\n  padding: 0;\n  border: none;\n  background: transparent;\n  cursor: pointer;\n  border-radius: 50%;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: transform 0.2s ease, opacity 0.2s ease;\n}\n\n.icon-button:active:not(.disabled) {\n  transform: scale(0.95);\n}\n\n.icon-button.disabled {\n  cursor: not-allowed;\n  opacity: 0.5;\n}\n\n.icon-circle {\n  width: 64px;\n  height: 64px;\n  border-radius: 50%;\n  background: var(--disabled-color, var(--disabled-text-color, #9e9e9e));\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: background-color 0.2s ease;\n}\n\n.icon-button.active .icon-circle {\n  background: var(--state-switch-on-color, var(--warning-color, #ffc107));\n}\n\n.status-icon {\n  color: var(--text-primary-on-background, #ffffff);\n  --mdc-icon-size: 32px;\n}\n\n.content {\n  flex: 1;\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n  min-width: 0; /* Allow text truncation */\n}\n\n.title {\n  font-size: 16px;\n  font-weight: 500;\n  color: var(--primary-text-color, #212121);\n  line-height: 1.2;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n\n.subtitle {\n  font-size: 12px;\n  line-height: 1;\n  color: var(--secondary-text-color, #757575);\n}\n\n.max-time.max-time-hidden {\n  display: none;\n}\n\n.last-run.last-run-hidden {\n  display: none;\n}\n`;
       
       this.shadowRoot.innerHTML = `${fontLink}<style>${styleContent}</style>${htmlContent}`;
       

@@ -1,9 +1,9 @@
 /**
  * Scheduler Climate Slots Card
- * Last build: 2026-02-17T15:15:42.013Z
- * Version: 1.0.6
+ * Last build: 2026-03-04T17:42:17.094Z
+ * Version: 1.1.0
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.0.6';
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.0';
 
 const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
 
@@ -105,6 +105,45 @@ if (typeof window !== 'undefined') {
 if (typeof window.ScheduleHelper === 'undefined') {
   window.ScheduleHelper = class ScheduleHelper {
   /**
+   * Escape string for safe use in HTML (prevents XSS when interpolating into innerHTML).
+   * @param {string} str - Raw string
+   * @returns {string} Escaped string
+   */
+  static escapeHtml(str) {
+    if (str == null || typeof str !== 'string') return '';
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Convert duration in hours to minutes (for climate card; API uses minutes).
+   * @param {number|null|string} hours - Duration in hours
+   * @returns {number|null} Minutes or null if invalid
+   */
+  static durationHoursToMinutes(hours) {
+    if (hours == null || hours === '') return null;
+    const h = parseFloat(hours);
+    if (Number.isNaN(h) || h < 0) return null;
+    return Math.round(h * 60);
+  }
+
+  /**
+   * Convert duration in minutes to hours (for climate card display).
+   * @param {number|null|string} minutes - Duration in minutes
+   * @returns {number|null} Hours or null if invalid
+   */
+  static durationMinutesToHours(minutes) {
+    if (minutes == null || minutes === '') return null;
+    const m = parseInt(minutes, 10);
+    if (Number.isNaN(m) || m < 0) return null;
+    return m / 60;
+  }
+
+  /**
    * Create slot data structure for add_item service
    * @param {Object} params - Slot parameters
    * @param {string} params.entity_id - Entity ID to control
@@ -136,7 +175,8 @@ if (typeof window.ScheduleHelper === 'undefined') {
     
     // Add duration only if specified (required for boiler, optional for climate)
     if (duration !== null && duration !== undefined && duration !== '') {
-      slotData.duration = parseInt(duration);
+      const d = parseInt(duration, 10);
+      if (!Number.isNaN(d) && d > 0) slotData.duration = d;
     }
     
     // Add service_end only if specified
@@ -179,16 +219,25 @@ if (typeof window.ScheduleHelper === 'undefined') {
    * Create service objects for climate entities
    * @param {string} entity_id - Entity ID
    * @param {string} hvac_mode - HVAC mode (e.g., "heat", "cool", "auto")
+   * @param {Object} [opts] - Optional: { temperature: number, fan_mode: string }
    * @returns {Object} Object with service_start and service_end for climate
    */
-  static createClimateServices(entity_id, hvac_mode) {
+  static createClimateServices(entity_id, hvac_mode, opts = {}) {
+    const value = {
+      entity_id: entity_id,
+      hvac_mode: hvac_mode
+    };
+    if (opts.temperature != null && opts.temperature !== '') {
+      const t = Number(opts.temperature);
+      if (!Number.isNaN(t)) value.temperature = t;
+    }
+    if (opts.fan_mode != null && opts.fan_mode !== '') {
+      value.fan_mode = opts.fan_mode;
+    }
     return {
       service_start: {
         name: "climate.set_hvac_mode",
-        value: {
-          entity_id: entity_id,
-          hvac_mode: hvac_mode
-        }
+        value: value
       },
       service_end: {
         name: "climate.set_hvac_mode",
@@ -238,7 +287,7 @@ if (typeof window.ScheduleHelper === 'undefined') {
         entity_id: bridgeSensor
       });
     } catch (e) {
-      // Ignore errors
+      if (typeof console !== 'undefined' && console.warn) console.warn('ScheduleHelper.forceSchedulerUpdate: update_entity failed', e);
     }
 
     // Wait for state to update from server, then trigger full re-render
@@ -250,7 +299,7 @@ if (typeof window.ScheduleHelper === 'undefined') {
             entity_id: bridgeSensor
           });
         } catch (e) {
-          // Ignore errors
+          if (typeof console !== 'undefined' && console.warn) console.warn('ScheduleHelper.forceSchedulerUpdate: update_entity (retry) failed', e);
         }
 
         // Trigger full re-render
@@ -332,201 +381,105 @@ if (typeof window.ScheduleHelper === 'undefined') {
   // Already assigned to window.ScheduleHelper above, no need to reassign
 }
 
-// Shared component: selector-duration/duration-selector.js
+// Shared component: selector-duration/hours/duration-selector.js
 /**
- * Duration Selector Utility
- * 
- * Shared utility for duration selection with slider and number input.
- * Used by both boiler and climate schedule cards.
+ * Duration Selector (hours)
+ * Slider + number input, duration in hours (0.5–12, step 0.5). Used by climate card.
+ * Slider uses real hours (min 0.5, max 12) so thumb at start = 0.5 h, like boiler.
  */
+
+const HOURS_MIN = 0.5;
+const HOURS_MAX = 12;
+const HOURS_STEP = 0.5;
 
 // Prevent duplicate class declaration when multiple cards are loaded
 if (typeof window.DurationSelector === 'undefined') {
   window.DurationSelector = class DurationSelector {
-  /**
-   * Compute step so the slider can reach max (step must divide range).
-   * Picks a divisor of (max - min) closest to preferredStep.
-   */
-  static computeStep(min, max, preferredStep = 15) {
-    const range = max - min;
-    if (range <= 0) return 1;
-    if (preferredStep >= range) return range;
-    const divisors = [];
-    for (let i = 1; i <= range; i++) {
-      if (range % i === 0) divisors.push(i);
-    }
-    if (divisors.length === 0) return 1;
-    let best = divisors[0];
-    for (let j = 0; j < divisors.length; j++) {
-      const d = divisors[j];
-      if (Math.abs(d - preferredStep) < Math.abs(best - preferredStep)) best = d;
-    }
-    return best;
+  static computeStep(min, max, preferredStep = 0.5) {
+    return preferredStep;
   }
 
-  /**
-   * Build list of allowed duration values: multiples of stepBase (5) from min up to max,
-   * plus max itself if it's not a multiple of 5 (e.g. 66, 69, 63).
-   * Example: min=5, max=66 → [5,10,15,...,60,65,66]; max=63 → [5,10,...,60,63].
-   * @param {number} min - Minimum value
-   * @param {number} max - Maximum value
-   * @param {number} stepBase - Base step for "nice" values (default 5)
-   * @returns {number[]} Allowed values; slider will use index into this array
-   */
-  static computeAllowedValues(min, max, stepBase = 5) {
-    if (max < min) return [min];
-    const list = [];
-    let v = Math.ceil(min / stepBase) * stepBase;
-    if (v > min) list.push(min);
-    while (v <= max) {
-      list.push(v);
-      v += stepBase;
-    }
-    if (list.length && list[list.length - 1] < max) list.push(max);
-    return list;
-  }
-
-  /**
-   * Get selected duration value
-   * @param {HTMLElement} shadowRoot - Shadow root of the card or container element
-   * @returns {number|null} Duration in minutes, or null if no duration
-   */
+  /** @returns {number|null} Duration in hours, or null */
   static getSelectedDuration(shadowRoot) {
-    // Check if shadowRoot itself is the wrapper (when called with wrapper element directly)
     let wrapper = null;
     if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
       wrapper = shadowRoot;
     } else {
-      // Find wrapper inside shadowRoot
       wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
     }
-    
     if (wrapper) {
-      // Find input in the same wrapper as slider (they are siblings)
       const input = wrapper.querySelector('[data-action="update-duration"]');
       if (input) {
         const value = input.value;
-        return value && value !== '' ? parseInt(value) : null;
+        if (value === '' || value == null) return null;
+        const h = parseFloat(value);
+        return Number.isNaN(h) ? null : h;
       }
     }
-    // Fallback: search in shadowRoot
     const input = shadowRoot.querySelector('[data-action="update-duration"]');
     if (!input) return null;
     const value = input.value;
-    return value && value !== '' ? parseInt(value) : null;
+    if (value === '' || value == null) return null;
+    const h = parseFloat(value);
+    return Number.isNaN(h) ? null : h;
   }
 
-  /**
-   * Set duration value (syncs both slider and input)
-   * @param {HTMLElement} shadowRoot - Shadow root of the card or container element
-   * @param {number|null} duration - Duration in minutes, or null to clear
-   */
+  /** @param {number|null} duration - Duration in hours */
   static setSelectedDuration(shadowRoot, duration) {
     const wrapper = shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')
       ? shadowRoot
       : shadowRoot.querySelector('.duration-selector-wrapper');
     const input = (wrapper || shadowRoot).querySelector('[data-action="update-duration"]');
     const slider = (wrapper || shadowRoot).querySelector('[data-action="update-duration-slider"]');
+    const num = duration != null && duration !== '' ? parseFloat(duration) : NaN;
+    const val = Number.isNaN(num) ? '' : Math.max(HOURS_MIN, Math.min(HOURS_MAX, num));
     if (input) {
-      input.value = duration != null && duration !== '' ? String(duration) : '';
+      input.value = val !== '' ? String(val) : '';
     }
     if (slider) {
-      const valuesStr = wrapper && wrapper.dataset.durationValues;
-      const allowedValues = valuesStr ? valuesStr.split(',').map(Number) : null;
-      if (allowedValues && allowedValues.length && duration != null && duration !== '') {
-        const d = parseInt(duration, 10);
-        let idx = allowedValues.indexOf(d);
-        if (idx < 0) {
-          idx = allowedValues.reduce((best, _, i) =>
-            Math.abs(allowedValues[i] - d) < Math.abs(allowedValues[best] - d) ? i : best, 0);
-        }
-        slider.value = String(idx);
-      } else {
-        slider.value = duration != null && duration !== '' ? String(duration) : '';
-      }
+      slider.value = val !== '' ? String(val) : '';
     }
   }
 
-  /**
-   * Reset duration selector to default value
-   * @param {HTMLElement} shadowRoot - Shadow root of the card
-   * @param {number|null} defaultDuration - Default duration (30 for boiler, null for climate)
-   */
-  static reset(shadowRoot, defaultDuration = 30) {
+  static reset(shadowRoot, defaultDuration = null) {
     this.setSelectedDuration(shadowRoot, defaultDuration);
   }
 
-  /**
-   * Attach event listeners to sync slider and input
-   * @param {HTMLElement} shadowRoot - Shadow root of the card or container element
-   */
   static attachEventListeners(shadowRoot) {
-    // Check if shadowRoot itself is the wrapper (when called with wrapper element directly)
     let wrapper = null;
     if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
       wrapper = shadowRoot;
     } else {
-      // Find wrapper inside shadowRoot
       wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
     }
-    
     if (!wrapper) return;
-    
-    // Find input and slider in the same wrapper (they are siblings)
     const input = wrapper.querySelector('[data-action="update-duration"]');
     const slider = wrapper.querySelector('[data-action="update-duration-slider"]');
-    
     if (!input || !slider) return;
-    
     const newInput = input.cloneNode(true);
     const newSlider = slider.cloneNode(true);
     input.parentNode.replaceChild(newInput, input);
     slider.parentNode.replaceChild(newSlider, slider);
-    
-    const valuesStr = wrapper.dataset.durationValues;
-    const allowedValues = valuesStr ? valuesStr.split(',').map(Number) : null;
-    let currentValue = parseInt(newInput.value, 10);
-    if (isNaN(currentValue) && allowedValues && allowedValues.length) currentValue = allowedValues[0];
-    if (allowedValues && allowedValues.length) {
-      let idx = allowedValues.indexOf(currentValue);
-      if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
-        Math.abs(allowedValues[i] - currentValue) < Math.abs(allowedValues[best] - currentValue) ? i : best, 0);
-      newSlider.value = String(idx);
-      newInput.value = String(allowedValues[idx]);
-    }
-    
+    newSlider.min = HOURS_MIN;
+    newSlider.max = HOURS_MAX;
+    newSlider.step = String(HOURS_STEP);
+    let currentHours = parseFloat(newInput.value);
+    if (Number.isNaN(currentHours)) currentHours = HOURS_MIN;
+    newSlider.value = String(currentHours);
     const sliderInputHandler = (e) => {
-      const raw = parseInt(e.target.value, 10);
-      if (allowedValues && allowedValues.length) {
-        currentValue = allowedValues[Math.min(raw, allowedValues.length - 1)];
-        newInput.value = String(currentValue);
-      } else {
-        currentValue = raw;
-        newInput.value = String(currentValue);
-      }
+      const val = parseFloat(e.target.value);
+      currentHours = Number.isNaN(val) ? HOURS_MIN : Math.max(HOURS_MIN, Math.min(HOURS_MAX, val));
+      newInput.value = String(currentHours);
       newInput.setAttribute('value', newInput.value);
     };
     newSlider.addEventListener('input', sliderInputHandler);
     newSlider.addEventListener('change', sliderInputHandler);
-    
     const inputChangeHandler = (e) => {
-      const value = parseInt(e.target.value, 10);
-      const min = parseInt(newInput.min, 10) || 0;
-      const max = parseInt(newInput.max, 10) || 1440;
+      const value = parseFloat(e.target.value);
       if (!isNaN(value)) {
-        const clamped = Math.max(min, Math.min(max, value));
-        currentValue = clamped;
-        newInput.value = String(clamped);
-        newInput.setAttribute('value', String(clamped));
-        if (allowedValues && allowedValues.length) {
-          let idx = allowedValues.indexOf(clamped);
-          if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
-            Math.abs(allowedValues[i] - clamped) < Math.abs(allowedValues[best] - clamped) ? i : best, 0);
-          newSlider.value = String(idx);
-        } else {
-          newSlider.value = String(clamped);
-        }
-        newSlider.setAttribute('value', newSlider.value);
+        currentHours = Math.max(HOURS_MIN, Math.min(HOURS_MAX, value));
+        newSlider.value = String(currentHours);
+        newInput.setAttribute('value', String(currentHours));
       }
     };
     newInput.addEventListener('input', inputChangeHandler);
@@ -535,156 +488,96 @@ if (typeof window.DurationSelector === 'undefined') {
     newSlider.addEventListener('click', (e) => e.stopPropagation());
   }
 
-  /**
-   * Get duration select element from a slot card
-   * @param {HTMLElement} slotCard - The slot card element
-   * @returns {HTMLElement|null} The duration input element
-   */
   static getInputFromSlot(slotCard) {
     return slotCard.querySelector('[data-action="update-duration"]');
   }
 
-  /**
-   * Set duration value in a slot card
-   * @param {HTMLElement} slotCard - The slot card element
-   * @param {number|null} duration - Duration in minutes, or null
-   * @param {Object} config - Optional config with min_duration, max_duration, duration_step
-   */
+  /** @param {number|null} duration - Duration in hours */
   static setDurationInSlot(slotCard, duration, config = null) {
     const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
       ? slotCard
       : slotCard.querySelector('.duration-selector-wrapper');
     const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
     const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
-    
-    if (config && (input || slider)) {
-      const minDuration = config.min_duration || 15;
-      const maxDuration = config.max_duration || 1440;
-      const allowedValues = this.computeAllowedValues(minDuration, maxDuration, 5);
-      if (wrapper) wrapper.dataset.durationValues = allowedValues.join(',');
-      if (input) {
-        input.min = minDuration;
-        input.max = maxDuration;
-        input.step = 1;
-      }
-      if (slider) {
-        slider.min = 0;
-        slider.max = Math.max(0, allowedValues.length - 1);
-        slider.step = 1;
-      }
+    if (config && input) {
+      const minH = config.min_duration ?? HOURS_MIN;
+      const maxH = config.max_duration ?? HOURS_MAX;
+      input.min = minH;
+      input.max = maxH;
+      input.step = String(HOURS_STEP);
     }
-    
+    if (slider) {
+      slider.min = config?.min_duration ?? HOURS_MIN;
+      slider.max = config?.max_duration ?? HOURS_MAX;
+      slider.step = String(HOURS_STEP);
+    }
+    const num = duration != null && duration !== '' ? parseFloat(duration) : NaN;
+    const val = Number.isNaN(num) ? '' : Math.max(HOURS_MIN, Math.min(HOURS_MAX, num));
     if (input) {
-      input.value = duration != null && duration !== '' ? String(duration) : '';
+      input.value = val !== '' ? String(val) : '';
     }
-    if (slider && wrapper && wrapper.dataset.durationValues) {
-      const allowedValues = wrapper.dataset.durationValues.split(',').map(Number);
-      const d = parseInt(duration, 10);
-      if (!isNaN(d)) {
-        let idx = allowedValues.indexOf(d);
-        if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
-          Math.abs(allowedValues[i] - d) < Math.abs(allowedValues[best] - d) ? i : best, 0);
-        slider.value = String(idx);
-      } else {
-        slider.value = '0';
-      }
-    } else if (slider) {
-      slider.value = duration != null && duration !== '' ? String(duration) : '';
+    if (slider) {
+      slider.value = val !== '' ? String(val) : '';
     }
   }
 
-  /**
-   * Attach event listeners for duration selector in a slot card
-   * @param {HTMLElement} slotCard - The slot card element
-   * @param {Function} onChangeCallback - Callback function when duration changes (receives duration value)
-   * @param {Object} config - Optional config with min_duration, max_duration, duration_step
-   */
   static attachEventListenersInSlot(slotCard, onChangeCallback, config = null) {
     const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
       ? slotCard
       : slotCard.querySelector('.duration-selector-wrapper');
     const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
     const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
-    
-    if (config && input && slider) {
-      const minDuration = config.min_duration || 15;
-      const maxDuration = config.max_duration || 1440;
-      const allowedValues = this.computeAllowedValues(minDuration, maxDuration, 5);
-      if (wrapper) wrapper.dataset.durationValues = allowedValues.join(',');
-      input.min = minDuration;
-      input.max = maxDuration;
-      input.step = 1;
-      slider.min = 0;
-      slider.max = Math.max(0, allowedValues.length - 1);
-      slider.step = 1;
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
+    if (config && input) {
+      input.min = minH;
+      input.max = maxH;
+      input.step = String(HOURS_STEP);
     }
-    
+    if (slider) {
+      slider.min = minH;
+      slider.max = maxH;
+      slider.step = String(HOURS_STEP);
+    }
     if (input && slider) {
       const newInput = input.cloneNode(true);
       const newSlider = slider.cloneNode(true);
       input.parentNode.replaceChild(newInput, input);
       slider.parentNode.replaceChild(newSlider, slider);
-      
-      const valuesStr = wrapper && wrapper.dataset.durationValues;
-      const allowedValues = valuesStr ? valuesStr.split(',').map(Number) : null;
-      let currentValue = parseInt(newInput.value, 10);
-      if (isNaN(currentValue) && allowedValues && allowedValues.length) currentValue = allowedValues[0];
-      if (allowedValues && allowedValues.length) {
-        let idx = allowedValues.indexOf(currentValue);
-        if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
-          Math.abs(allowedValues[i] - currentValue) < Math.abs(allowedValues[best] - currentValue) ? i : best, 0);
-        newSlider.value = String(idx);
-        newInput.value = String(allowedValues[idx]);
-      }
-      
+      let currentHours = parseFloat(newInput.value);
+      if (isNaN(currentHours)) currentHours = HOURS_MIN;
+      newSlider.value = String(currentHours);
       const sliderHandler = (e) => {
-        const raw = parseInt(e.target.value, 10);
-        if (allowedValues && allowedValues.length) {
-          currentValue = allowedValues[Math.min(raw, allowedValues.length - 1)];
-          newInput.value = String(currentValue);
-        } else {
-          currentValue = raw;
-          newInput.value = String(currentValue);
-        }
+        const val = parseFloat(e.target.value);
+        currentHours = Number.isNaN(val) ? HOURS_MIN : Math.max(HOURS_MIN, Math.min(HOURS_MAX, val));
+        newInput.value = String(currentHours);
         newInput.setAttribute('value', newInput.value);
-        if (onChangeCallback) onChangeCallback(currentValue);
+        if (onChangeCallback) onChangeCallback(currentHours);
       };
-      
       const inputHandler = (e) => {
-        const value = parseInt(e.target.value, 10);
-        const min = parseInt(newInput.min, 10) || 0;
-        const max = parseInt(newInput.max, 10) || 1440;
+        const value = parseFloat(e.target.value);
         if (!isNaN(value)) {
-          const clamped = Math.max(min, Math.min(max, value));
-          currentValue = clamped;
-          newInput.value = String(clamped);
-          newInput.setAttribute('value', String(clamped));
-          if (allowedValues && allowedValues.length) {
-            let idx = allowedValues.indexOf(clamped);
-            if (idx < 0) idx = allowedValues.reduce((best, _, i) =>
-              Math.abs(allowedValues[i] - clamped) < Math.abs(allowedValues[best] - clamped) ? i : best, 0);
-            newSlider.value = String(idx);
-          } else {
-            newSlider.value = String(clamped);
-          }
-          newSlider.setAttribute('value', newSlider.value);
-          if (onChangeCallback) onChangeCallback(currentValue);
-        } else if (e.target.value === '') {
-          if (onChangeCallback) onChangeCallback(null);
+          currentHours = Math.max(HOURS_MIN, Math.min(HOURS_MAX, value));
+          newSlider.value = String(currentHours);
+          newInput.setAttribute('value', newInput.value);
         }
       };
-      
+      const blurHandler = () => {
+        if (!isNaN(currentHours)) {
+          newInput.value = String(currentHours);
+          newInput.setAttribute('value', newInput.value);
+          if (onChangeCallback) onChangeCallback(currentHours);
+        }
+      };
       newSlider.addEventListener('input', sliderHandler);
       newSlider.addEventListener('change', sliderHandler);
       newInput.addEventListener('input', inputHandler);
-      newInput.addEventListener('change', inputHandler);
+      newInput.addEventListener('blur', blurHandler);
       newInput.addEventListener('click', (e) => e.stopPropagation());
       newSlider.addEventListener('click', (e) => e.stopPropagation());
     }
   }
   };
-  
-  // Already assigned to window.DurationSelector above, no need to reassign
 }
 
 // Shared component: selector-weekday/weekday-selector.js
@@ -754,8 +647,8 @@ if (typeof window.WeekdaySelector === 'undefined') {
       day.classList.remove('active');
     });
 
-    // Hide custom weekdays selector (everyday is default)
-    const customWeekdays = shadowRoot.getElementById('popup-weekdays-custom');
+    // Hide custom weekdays selector (everyday is default); use querySelector so scope can be shadowRoot or a container (e.g. add popup form)
+    const customWeekdays = shadowRoot.querySelector ? shadowRoot.querySelector('#popup-weekdays-custom') : (shadowRoot.getElementById ? shadowRoot.getElementById('popup-weekdays-custom') : null);
     if (customWeekdays) customWeekdays.classList.add('hidden');
   }
 
@@ -896,7 +789,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     if (this._htmlTemplate) return this._htmlTemplate;
     
     // Template is embedded in production build
-    this._htmlTemplate = `  <!-- Main Header -->\n  <div class="main-header">\n    <div class="header-left">\n      <div class="header-icon {{ENABLED_CLASS}}" data-action="toggle-enabled" title="Toggle scheduler">\n        <ha-icon icon="mdi:calendar-clock"></ha-icon>\n        <!-- <ha-icon icon="{{ICON}}"></ha-icon> -->\n      </div>\n      <div class="header-text">\n        <div class="header-title {{HEADER_TITLE_CLASS}}">\n          {{TITLE}}\n        </div>\n        <div class="header-status">{{STATUS_TEXT}}</div>\n      </div>\n    </div>\n  </div>\n  \n  <!-- Slots List (hidden when 0 slots) -->\n  <div class="slots-container{{SLOTS_CONTAINER_CLASS}}">\n    {{ITEMS_CONTENT}}\n  </div>\n  \n  <!-- Add Slot Button -->\n  <button class="button-outline" data-action="open-add-popup">\n    Add Schedule Slot\n  </button>\n  \n  <!-- Add Slot Popup -->\n  <div class="popup-overlay" id="add-popup" style="display: none;">\n    <div class="popup-content">\n      <div class="popup-header">\n        <ha-icon icon="mdi:power"></ha-icon>\n        <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">\n          <span class="popup-title">Add Schedule Slot</span>\n          <div style="font-size: 12px; color: var(--secondary-text-color, #757575);">\n            for {{ENTITY_NAME}}\n          </div>\n        </div>\n        <button class="popup-close" data-action="close-popup">\n          <ha-icon icon="mdi:close"></ha-icon>\n        </button>\n      </div>\n      \n      <div class="popup-body">\n        <!-- Title Input -->\n        <div class="popup-field">\n          <label>\n            <ha-icon icon="mdi:label-outline"></ha-icon>\n            <span>Title (optional)</span>\n          </label>\n          <input type="text" class="homie-input" id="popup-title" placeholder="e.g. Morning heating">\n        </div>\n        \n        <!-- Time Input -->\n        <div class="popup-field">\n          <label>\n            <ha-icon icon="mdi:clock-outline"></ha-icon>\n            <span>Start Time</span>\n          </label>\n          <div class="time-selects">\n            <select class="homie-select popup-time-hours" id="popup-time-hours">\n              <option value="00">00</option>\n              <option value="01">01</option>\n              <option value="02">02</option>\n              <option value="03">03</option>\n              <option value="04">04</option>\n              <option value="05">05</option>\n              <option value="06">06</option>\n              <option value="07">07</option>\n              <option value="08" selected>08</option>\n              <option value="09">09</option>\n              <option value="10">10</option>\n              <option value="11">11</option>\n              <option value="12">12</option>\n              <option value="13">13</option>\n              <option value="14">14</option>\n              <option value="15">15</option>\n              <option value="16">16</option>\n              <option value="17">17</option>\n              <option value="18">18</option>\n              <option value="19">19</option>\n              <option value="20">20</option>\n              <option value="21">21</option>\n              <option value="22">22</option>\n              <option value="23">23</option>\n            </select>\n            <span class="time-separator">:</span>\n            <select class="homie-select popup-time-minutes" id="popup-time-minutes">\n              <option value="00" selected>00</option>\n              <option value="05">05</option>\n              <option value="10">10</option>\n              <option value="15">15</option>\n              <option value="20">20</option>\n              <option value="25">25</option>\n              <option value="30">30</option>\n              <option value="35">35</option>\n              <option value="40">40</option>\n              <option value="45">45</option>\n              <option value="50">50</option>\n              <option value="55">55</option>\n            </select>\n          </div>\n        </div>\n        \n        <!-- Entities to apply (dropdown multi-select when card has multiple entities) -->\n        <div class="popup-field popup-entities-wrap" id="popup-entities-container" style="display: none;">\n          <label>\n            <ha-icon icon="mdi:format-list-checks"></ha-icon>\n            <span>Apply to entities</span>\n          </label>\n          <div class="popup-entities-trigger" id="popup-entities-trigger" tabindex="0" role="combobox">\n            <div class="popup-entities-chips" id="popup-entities-chips"></div>\n            <ha-icon class="popup-entities-caret" icon="mdi:chevron-down"></ha-icon>\n          </div>\n          <div class="popup-entities-dropdown" id="popup-entities-dropdown">\n            <label class="popup-entity-row popup-entity-select-all">\n              <input type="checkbox" id="popup-entities-select-all">\n              <span class="popup-entity-name">Select all</span>\n            </label>\n            <!-- SHARED:entities-selector -->\n<div class="entities-selector-list"></div>\n<template class="entities-selector-row-tpl">\n  <label class="entities-selector-row">\n    <input type="checkbox" name="entities-selector-entity" value="">\n    <span class="entities-selector-entity-name"></span>\n  </label>\n</template>\n<!-- END:entities-selector -->\n          </div>\n        </div>\n        \n        <!-- HVAC Mode Select (full width) -->\n        <div class="popup-field popup-field-mode">\n          <label>\n            <ha-icon icon="mdi:thermostat"></ha-icon>\n            <span>HVAC Mode</span>\n          </label>\n          <select class="homie-select popup-mode-select" id="popup-hvac-mode">\n            {{HVAC_MODES_OPTIONS}}\n          </select>\n          <div class="popup-hvac-mode-warning" id="popup-hvac-mode-warning"></div>\n        </div>\n        \n        <!-- Duration Selector (HA-style row: label + ha-switch) -->\n        <div class="popup-field">\n          <div class="popup-field-row popup-duration-row">\n            <label class="popup-field-row-label">\n              <ha-icon icon="mdi:timer-outline"></ha-icon>\n              <span>Duration (minutes)</span>\n            </label>\n            <ha-switch id="popup-duration-enabled"></ha-switch>\n          </div>\n          <div id="popup-duration-wrapper" style="display: none; margin-top: 8px;">\n            <!-- SHARED:duration-selector -->\n<!-- Duration Selector Component (universal - for popup and slot) -->\n<div class="duration-selector-wrapper">\n  <input \n    type="range" \n    class="duration-slider" \n    data-action="update-duration-slider"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    step="{{DURATION_STEP}}"\n    value="{{DURATION_VALUE}}"\n  />\n  <input \n    type="number" \n    class="duration-input homie-input" \n    data-action="update-duration"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    step="{{DURATION_STEP}}"\n    value="{{DURATION_VALUE}}"\n  />\n</div>\n<!-- END:duration-selector -->\n          </div>\n        </div>\n        \n        <!-- Weekday Selector -->\n        <div class="popup-field">\n          <label>\n            <ha-icon icon="mdi:calendar"></ha-icon>\n            <span>Days of Week</span>\n          </label>\n          <!-- SHARED:weekday-selector -->\n<!-- Weekday Selection Component (universal - without popup-field) -->\n<div class="weekday-mode-selector">\n  <button type="button" class="weekday-mode-btn active" data-mode="everyday">Everyday</button>\n  <button type="button" class="weekday-mode-btn" data-mode="weekdays">Weekdays</button>\n  <button type="button" class="weekday-mode-btn" data-mode="custom">Custom</button>\n</div>\n<div class="popup-weekdays hidden" id="popup-weekdays-custom">\n  <div class="popup-weekday" data-day="0">Mon</div>\n  <div class="popup-weekday" data-day="1">Tue</div>\n  <div class="popup-weekday" data-day="2">Wed</div>\n  <div class="popup-weekday" data-day="3">Thu</div>\n  <div class="popup-weekday" data-day="4">Fri</div>\n  <div class="popup-weekday" data-day="5">Sat</div>\n  <div class="popup-weekday" data-day="6">Sun</div>\n</div>\n<!-- END:weekday-selector -->\n        </div>\n      </div>\n      \n      <div class="popup-footer">\n        <button class="popup-button cancel" data-action="close-popup">Cancel</button>\n        <button class="popup-button save" data-action="save-slot">Save</button>\n      </div>\n    </div>\n  </div>\n\n<!-- Slot Item Template -->\n<template id="slot-item-template">\n  <div class="slot-card {{DISABLED_CLASS}}" data-item-id="{{ITEM_ID}}">\n    <div class="slot-header">\n      <div class="slot-icon {{ICON_CLASS}}" data-action="toggle-item" title="Toggle slot">\n        <ha-icon icon="mdi:power"></ha-icon>\n      </div>\n      <div class="slot-info">\n        <div class="slot-name">{{SLOT_NAME}}</div>\n        <div class="slot-status">{{SLOT_STATUS}}</div>\n      </div>\n    </div>\n    <button class="slot-expand" data-action="toggle-expand" title="Expand/collapse details">\n      <ha-icon icon="mdi:chevron-down"></ha-icon>\n    </button>\n    \n    <div class="slot-expandable">\n      <div class="slot-details">\n        <div class="slot-title">\n          <ha-icon icon="mdi:label-outline"></ha-icon>\n          <input type="text" class="homie-input slot-title-input" data-action="update-slot-title" data-item-id="{{ITEM_ID}}" value="{{SLOT_TITLE}}" placeholder="Slot name">\n        </div>\n        <div class="slot-time">\n          <ha-icon icon="mdi:clock-outline"></ha-icon>\n          <div class="time-selects">\n            <select class="homie-select slot-time-hours" data-action="update-time-hours" data-item-id="{{ITEM_ID}}">\n              <option value="00" {{TIME_HOURS_00}}>00</option>\n              <option value="01" {{TIME_HOURS_01}}>01</option>\n              <option value="02" {{TIME_HOURS_02}}>02</option>\n              <option value="03" {{TIME_HOURS_03}}>03</option>\n              <option value="04" {{TIME_HOURS_04}}>04</option>\n              <option value="05" {{TIME_HOURS_05}}>05</option>\n              <option value="06" {{TIME_HOURS_06}}>06</option>\n              <option value="07" {{TIME_HOURS_07}}>07</option>\n              <option value="08" {{TIME_HOURS_08}}>08</option>\n              <option value="09" {{TIME_HOURS_09}}>09</option>\n              <option value="10" {{TIME_HOURS_10}}>10</option>\n              <option value="11" {{TIME_HOURS_11}}>11</option>\n              <option value="12" {{TIME_HOURS_12}}>12</option>\n              <option value="13" {{TIME_HOURS_13}}>13</option>\n              <option value="14" {{TIME_HOURS_14}}>14</option>\n              <option value="15" {{TIME_HOURS_15}}>15</option>\n              <option value="16" {{TIME_HOURS_16}}>16</option>\n              <option value="17" {{TIME_HOURS_17}}>17</option>\n              <option value="18" {{TIME_HOURS_18}}>18</option>\n              <option value="19" {{TIME_HOURS_19}}>19</option>\n              <option value="20" {{TIME_HOURS_20}}>20</option>\n              <option value="21" {{TIME_HOURS_21}}>21</option>\n              <option value="22" {{TIME_HOURS_22}}>22</option>\n              <option value="23" {{TIME_HOURS_23}}>23</option>\n            </select>\n            <span class="time-separator">:</span>\n            <select class="homie-select slot-time-minutes" data-action="update-time-minutes" data-item-id="{{ITEM_ID}}">\n              <option value="00" {{TIME_MINUTES_00}}>00</option>\n              <option value="05" {{TIME_MINUTES_05}}>05</option>\n              <option value="10" {{TIME_MINUTES_10}}>10</option>\n              <option value="15" {{TIME_MINUTES_15}}>15</option>\n              <option value="20" {{TIME_MINUTES_20}}>20</option>\n              <option value="25" {{TIME_MINUTES_25}}>25</option>\n              <option value="30" {{TIME_MINUTES_30}}>30</option>\n              <option value="35" {{TIME_MINUTES_35}}>35</option>\n              <option value="40" {{TIME_MINUTES_40}}>40</option>\n              <option value="45" {{TIME_MINUTES_45}}>45</option>\n              <option value="50" {{TIME_MINUTES_50}}>50</option>\n              <option value="55" {{TIME_MINUTES_55}}>55</option>\n            </select>\n          </div>\n        </div>\n      </div>\n      <div class="slot-duration">\n        <ha-icon icon="mdi:timer-outline"></ha-icon>\n        <!-- SHARED:duration-selector -->\n<!-- Duration Selector Component (universal - for popup and slot) -->\n<div class="duration-selector-wrapper">\n  <input \n    type="range" \n    class="duration-slider" \n    data-action="update-duration-slider"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    step="{{DURATION_STEP}}"\n    value="{{DURATION_VALUE}}"\n  />\n  <input \n    type="number" \n    class="duration-input homie-input" \n    data-action="update-duration"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    step="{{DURATION_STEP}}"\n    value="{{DURATION_VALUE}}"\n  />\n</div>\n<!-- END:duration-selector -->\n      </div>\n      <div class="slot-hvac-mode">\n        <ha-icon icon="mdi:thermostat"></ha-icon>\n        <select class="homie-select" data-action="update-hvac-mode" data-item-id="{{ITEM_ID}}">\n          {{HVAC_MODE_OPTIONS}}\n        </select>\n      </div>\n      \n      <!-- Apply to entities (when card has multiple entities) - same dropdown as in Add Slot popup -->\n      <div class="slot-entities-wrap">\n        <div class="slot-entities-label">\n          <ha-icon icon="mdi:format-list-checks"></ha-icon>\n          <span>Apply to entities</span>\n        </div>\n        <div class="slot-entities-trigger" tabindex="0" role="combobox">\n          <div class="slot-entities-chips"></div>\n          <ha-icon class="slot-entities-caret" icon="mdi:chevron-down"></ha-icon>\n        </div>\n        <div class="slot-entities-dropdown">\n          <label class="slot-entity-row slot-entity-select-all">\n            <input type="checkbox" class="slot-entities-select-all-input">\n            <span class="slot-entity-name">Select all</span>\n          </label>\n          <!-- SHARED:entities-selector -->\n<div class="entities-selector-list"></div>\n<template class="entities-selector-row-tpl">\n  <label class="entities-selector-row">\n    <input type="checkbox" name="entities-selector-entity" value="">\n    <span class="entities-selector-entity-name"></span>\n  </label>\n</template>\n<!-- END:entities-selector -->\n        </div>\n      </div>\n      \n      <!-- SHARED:weekday-selector -->\n<!-- Weekday Selection Component (universal - without popup-field) -->\n<div class="weekday-mode-selector">\n  <button type="button" class="weekday-mode-btn active" data-mode="everyday">Everyday</button>\n  <button type="button" class="weekday-mode-btn" data-mode="weekdays">Weekdays</button>\n  <button type="button" class="weekday-mode-btn" data-mode="custom">Custom</button>\n</div>\n<div class="popup-weekdays hidden" id="popup-weekdays-custom">\n  <div class="popup-weekday" data-day="0">Mon</div>\n  <div class="popup-weekday" data-day="1">Tue</div>\n  <div class="popup-weekday" data-day="2">Wed</div>\n  <div class="popup-weekday" data-day="3">Thu</div>\n  <div class="popup-weekday" data-day="4">Fri</div>\n  <div class="popup-weekday" data-day="5">Sat</div>\n  <div class="popup-weekday" data-day="6">Sun</div>\n</div>\n<!-- END:weekday-selector -->\n      \n      <button class="slot-delete" data-action="delete-item">\n        <ha-icon icon="mdi:delete"></ha-icon>\n        <span>Remove {{SLOT_NAME_REMOVE}}</span>\n      </button>\n    </div>\n  </div>\n</template>\n`;
+    this._htmlTemplate = `  <!-- Main Header -->\n  <div class="main-header">\n    <div class="header-left">\n      <div class="header-icon {{ENABLED_CLASS}}" data-action="toggle-enabled" title="Toggle scheduler">\n        <ha-icon icon="mdi:calendar-clock"></ha-icon>\n        <!-- <ha-icon icon="{{ICON}}"></ha-icon> -->\n      </div>\n      <div class="header-text">\n        <div class="header-title {{HEADER_TITLE_CLASS}}">\n          {{TITLE}}\n        </div>\n        <div class="header-status">{{STATUS_TEXT}}</div>\n      </div>\n    </div>\n  </div>\n  \n  <!-- Slots List (hidden when 0 slots) -->\n  <div class="slots-container{{SLOTS_CONTAINER_CLASS}}">\n    {{ITEMS_CONTENT}}\n  </div>\n  \n  <!-- Add Slot Button -->\n  <button class="button-outline" data-action="open-add-popup">\n    Add Schedule Slot\n  </button>\n  \n  <!-- Add Slot Popup -->\n  <div class="popup-overlay" id="add-popup" style="display: none;">\n    <div class="popup-content">\n      <div class="popup-header">\n        <ha-icon icon="mdi:power"></ha-icon>\n        <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">\n          <span class="popup-title">Add Schedule Slot</span>\n          <div style="font-size: 12px; color: var(--secondary-text-color, #757575);">\n            for {{ENTITY_NAME}}\n          </div>\n        </div>\n        <button class="popup-close" data-action="close-popup">\n          <ha-icon icon="mdi:close"></ha-icon>\n        </button>\n      </div>\n      \n      <div class="popup-body">\n        <div id="add-popup-error" class="popup-error" style="display: none;" data-slot-form="popup-error"></div>\n        <!-- SHARED:slot-form-fields -->\n<!-- Climate: form fields for Add Slot popup and Edit Slot (same structure, one source of truth) -->\n<div class="slot-form" data-slot-form="root">\n  <div class="slot-form-field" data-slot-form="field-title">\n    <label class="slot-form-label">\n      <ha-icon icon="mdi:label-outline"></ha-icon>\n      <span>Title (optional)</span>\n    </label>\n    <input type="text" class="homie-input slot-form-title-input" data-slot-form="title" data-item-id="{{ITEM_ID}}" value="{{SLOT_TITLE}}" placeholder="e.g. Morning heating">\n  </div>\n\n  <div class="slot-form-field" data-slot-form="field-time">\n    <label class="slot-form-label">\n      <ha-icon icon="mdi:clock-outline"></ha-icon>\n      <span>Start Time</span>\n    </label>\n    <div class="time-selects">\n      <select class="homie-select slot-form-time-hours" data-slot-form="time-hours" data-item-id="{{ITEM_ID}}">\n        <option value="00" {{TIME_HOURS_00}}>00</option>\n        <option value="01" {{TIME_HOURS_01}}>01</option>\n        <option value="02" {{TIME_HOURS_02}}>02</option>\n        <option value="03" {{TIME_HOURS_03}}>03</option>\n        <option value="04" {{TIME_HOURS_04}}>04</option>\n        <option value="05" {{TIME_HOURS_05}}>05</option>\n        <option value="06" {{TIME_HOURS_06}}>06</option>\n        <option value="07" {{TIME_HOURS_07}}>07</option>\n        <option value="08" {{TIME_HOURS_08}}>08</option>\n        <option value="09" {{TIME_HOURS_09}}>09</option>\n        <option value="10" {{TIME_HOURS_10}}>10</option>\n        <option value="11" {{TIME_HOURS_11}}>11</option>\n        <option value="12" {{TIME_HOURS_12}}>12</option>\n        <option value="13" {{TIME_HOURS_13}}>13</option>\n        <option value="14" {{TIME_HOURS_14}}>14</option>\n        <option value="15" {{TIME_HOURS_15}}>15</option>\n        <option value="16" {{TIME_HOURS_16}}>16</option>\n        <option value="17" {{TIME_HOURS_17}}>17</option>\n        <option value="18" {{TIME_HOURS_18}}>18</option>\n        <option value="19" {{TIME_HOURS_19}}>19</option>\n        <option value="20" {{TIME_HOURS_20}}>20</option>\n        <option value="21" {{TIME_HOURS_21}}>21</option>\n        <option value="22" {{TIME_HOURS_22}}>22</option>\n        <option value="23" {{TIME_HOURS_23}}>23</option>\n      </select>\n      <span class="time-separator">:</span>\n      <select class="homie-select slot-form-time-minutes" data-slot-form="time-minutes" data-item-id="{{ITEM_ID}}">\n        <option value="00" {{TIME_MINUTES_00}}>00</option>\n        <option value="05" {{TIME_MINUTES_05}}>05</option>\n        <option value="10" {{TIME_MINUTES_10}}>10</option>\n        <option value="15" {{TIME_MINUTES_15}}>15</option>\n        <option value="20" {{TIME_MINUTES_20}}>20</option>\n        <option value="25" {{TIME_MINUTES_25}}>25</option>\n        <option value="30" {{TIME_MINUTES_30}}>30</option>\n        <option value="35" {{TIME_MINUTES_35}}>35</option>\n        <option value="40" {{TIME_MINUTES_40}}>40</option>\n        <option value="45" {{TIME_MINUTES_45}}>45</option>\n        <option value="50" {{TIME_MINUTES_50}}>50</option>\n        <option value="55" {{TIME_MINUTES_55}}>55</option>\n      </select>\n    </div>\n  </div>\n\n  <div class="slot-form-field slot-form-entities-wrap" data-slot-form="entities-wrap" style="display: none;">\n    <label class="slot-form-label">\n      <ha-icon icon="mdi:format-list-checks"></ha-icon>\n      <span>Apply to entities</span>\n    </label>\n    <div class="slot-form-entities-trigger" data-slot-form="entities-trigger" tabindex="0" role="combobox">\n      <div class="slot-form-entities-chips" data-slot-form="entities-chips"></div>\n      <ha-icon class="slot-form-entities-caret" icon="mdi:chevron-down"></ha-icon>\n    </div>\n    <div class="slot-form-entities-dropdown" data-slot-form="entities-dropdown">\n      <label class="slot-form-entity-row slot-form-entities-select-all-row">\n        <input type="checkbox" class="slot-form-entities-select-all" data-slot-form="entities-select-all">\n        <span class="slot-form-entity-name">Select all</span>\n      </label>\n      <div class="entities-selector-list"></div>\n      <template class="entities-selector-row-tpl">\n        <label class="entities-selector-row">\n          <input type="checkbox" name="entities-selector-entity" value="">\n          <span class="entities-selector-entity-name"></span>\n        </label>\n      </template>\n    </div>\n  </div>\n\n  <div class="slot-form-row slot-form-row-mode-fan-temp">\n    <div class="slot-form-field slot-form-field-mode" data-slot-form="field-mode">\n      <label class="slot-form-label">\n        <ha-icon icon="mdi:thermostat"></ha-icon>\n        <span>Mode</span>\n      </label>\n      <select class="homie-select slot-form-mode-select" data-slot-form="mode" data-action="update-hvac-mode" data-item-id="{{ITEM_ID}}">\n        {{HVAC_MODE_OPTIONS}}\n      </select>\n      <div class="slot-form-mode-warning" data-slot-form="mode-warning"></div>\n    </div>\n    <div class="slot-form-field slot-form-field-fan" data-slot-form="field-fan">\n      <label class="slot-form-label">\n        <ha-icon icon="mdi:fan"></ha-icon>\n        <span>Fan</span>\n      </label>\n      <select class="homie-select slot-form-fan-select" data-slot-form="fan" data-item-id="{{ITEM_ID}}">\n        {{FAN_OPTIONS}}\n      </select>\n    </div>\n    <div class="slot-form-field slot-form-field-temp" data-slot-form="field-temp">\n      <label class="slot-form-label">\n        <ha-icon icon="mdi:thermometer"></ha-icon>\n        <span>Temp °C</span>\n      </label>\n      <input type="number" class="homie-input slot-form-temp-input" data-slot-form="temp" data-item-id="{{ITEM_ID}}" min="{{TEMP_MIN}}" max="{{TEMP_MAX}}" step="0.5" value="{{TEMP_VALUE}}" placeholder="—">\n    </div>\n  </div>\n\n  <div class="slot-form-field" data-slot-form="field-duration">\n    <div class="slot-form-duration-row popup-field-row">\n      <label class="slot-form-field-row-label popup-field-row-label">\n        <ha-icon icon="mdi:timer-outline"></ha-icon>\n        <span>{{DURATION_LABEL}}</span>\n      </label>\n      <ha-switch class="slot-form-duration-enabled" data-slot-form="duration-enabled"></ha-switch>\n    </div>\n    <div class="slot-form-duration-wrapper" data-slot-form="duration-wrapper" style="display: none; margin-top: 8px;">\n      <div class="duration-selector-wrapper">\n        <input type="range" class="duration-slider" data-action="update-duration-slider" data-item-id="{{ITEM_ID}}" min="{{DURATION_MIN}}" max="{{DURATION_MAX}}" step="0.5" value="{{DURATION_VALUE}}" />\n        <input type="number" class="duration-input homie-input" data-action="update-duration" data-item-id="{{ITEM_ID}}" min="{{DURATION_MIN}}" max="{{DURATION_MAX}}" step="0.5" value="{{DURATION_VALUE}}" />\n      </div>\n    </div>\n  </div>\n\n  <div class="slot-form-field" data-slot-form="field-weekdays">\n    <label class="slot-form-label">\n      <ha-icon icon="mdi:calendar"></ha-icon>\n      <span>Days of Week</span>\n    </label>\n    <div class="weekday-mode-selector">\n      <button type="button" class="weekday-mode-btn active" data-mode="everyday">Everyday</button>\n      <button type="button" class="weekday-mode-btn" data-mode="weekdays">Weekdays</button>\n      <button type="button" class="weekday-mode-btn" data-mode="custom">Custom</button>\n    </div>\n    <div class="popup-weekdays hidden" id="popup-weekdays-custom">\n      <div class="popup-weekday" data-day="0">Mon</div>\n      <div class="popup-weekday" data-day="1">Tue</div>\n      <div class="popup-weekday" data-day="2">Wed</div>\n      <div class="popup-weekday" data-day="3">Thu</div>\n      <div class="popup-weekday" data-day="4">Fri</div>\n      <div class="popup-weekday" data-day="5">Sat</div>\n      <div class="popup-weekday" data-day="6">Sun</div>\n    </div>\n  </div>\n</div>\n<!-- END:slot-form-fields -->\n      </div>\n      \n      <div class="popup-footer">\n        <button class="popup-button cancel" data-action="close-popup">Cancel</button>\n        <button class="popup-button save" data-action="save-slot">Save</button>\n      </div>\n    </div>\n  </div>\n\n<!-- Slot Item Template -->\n<template id="slot-item-template">\n  <div class="slot-card {{DISABLED_CLASS}}" data-item-id="{{ITEM_ID}}">\n    <div class="slot-header">\n      <div class="slot-icon {{ICON_CLASS}}" data-action="toggle-item" title="Toggle slot">\n        <ha-icon icon="mdi:power"></ha-icon>\n      </div>\n      <div class="slot-info">\n        <div class="slot-name">{{SLOT_NAME}}</div>\n        <div class="slot-status">{{SLOT_STATUS}}</div>\n      </div>\n    </div>\n    <button class="slot-expand" data-action="toggle-expand" title="Expand/collapse details">\n      <ha-icon icon="mdi:chevron-down"></ha-icon>\n    </button>\n    \n    <div class="slot-expandable">\n      <div class="slot-error-message" data-slot-error style="display: none;"></div>\n      <!-- SHARED:slot-form-fields -->\n<!-- Climate: form fields for Add Slot popup and Edit Slot (same structure, one source of truth) -->\n<div class="slot-form" data-slot-form="root">\n  <div class="slot-form-field" data-slot-form="field-title">\n    <label class="slot-form-label">\n      <ha-icon icon="mdi:label-outline"></ha-icon>\n      <span>Title (optional)</span>\n    </label>\n    <input type="text" class="homie-input slot-form-title-input" data-slot-form="title" data-item-id="{{ITEM_ID}}" value="{{SLOT_TITLE}}" placeholder="e.g. Morning heating">\n  </div>\n\n  <div class="slot-form-field" data-slot-form="field-time">\n    <label class="slot-form-label">\n      <ha-icon icon="mdi:clock-outline"></ha-icon>\n      <span>Start Time</span>\n    </label>\n    <div class="time-selects">\n      <select class="homie-select slot-form-time-hours" data-slot-form="time-hours" data-item-id="{{ITEM_ID}}">\n        <option value="00" {{TIME_HOURS_00}}>00</option>\n        <option value="01" {{TIME_HOURS_01}}>01</option>\n        <option value="02" {{TIME_HOURS_02}}>02</option>\n        <option value="03" {{TIME_HOURS_03}}>03</option>\n        <option value="04" {{TIME_HOURS_04}}>04</option>\n        <option value="05" {{TIME_HOURS_05}}>05</option>\n        <option value="06" {{TIME_HOURS_06}}>06</option>\n        <option value="07" {{TIME_HOURS_07}}>07</option>\n        <option value="08" {{TIME_HOURS_08}}>08</option>\n        <option value="09" {{TIME_HOURS_09}}>09</option>\n        <option value="10" {{TIME_HOURS_10}}>10</option>\n        <option value="11" {{TIME_HOURS_11}}>11</option>\n        <option value="12" {{TIME_HOURS_12}}>12</option>\n        <option value="13" {{TIME_HOURS_13}}>13</option>\n        <option value="14" {{TIME_HOURS_14}}>14</option>\n        <option value="15" {{TIME_HOURS_15}}>15</option>\n        <option value="16" {{TIME_HOURS_16}}>16</option>\n        <option value="17" {{TIME_HOURS_17}}>17</option>\n        <option value="18" {{TIME_HOURS_18}}>18</option>\n        <option value="19" {{TIME_HOURS_19}}>19</option>\n        <option value="20" {{TIME_HOURS_20}}>20</option>\n        <option value="21" {{TIME_HOURS_21}}>21</option>\n        <option value="22" {{TIME_HOURS_22}}>22</option>\n        <option value="23" {{TIME_HOURS_23}}>23</option>\n      </select>\n      <span class="time-separator">:</span>\n      <select class="homie-select slot-form-time-minutes" data-slot-form="time-minutes" data-item-id="{{ITEM_ID}}">\n        <option value="00" {{TIME_MINUTES_00}}>00</option>\n        <option value="05" {{TIME_MINUTES_05}}>05</option>\n        <option value="10" {{TIME_MINUTES_10}}>10</option>\n        <option value="15" {{TIME_MINUTES_15}}>15</option>\n        <option value="20" {{TIME_MINUTES_20}}>20</option>\n        <option value="25" {{TIME_MINUTES_25}}>25</option>\n        <option value="30" {{TIME_MINUTES_30}}>30</option>\n        <option value="35" {{TIME_MINUTES_35}}>35</option>\n        <option value="40" {{TIME_MINUTES_40}}>40</option>\n        <option value="45" {{TIME_MINUTES_45}}>45</option>\n        <option value="50" {{TIME_MINUTES_50}}>50</option>\n        <option value="55" {{TIME_MINUTES_55}}>55</option>\n      </select>\n    </div>\n  </div>\n\n  <div class="slot-form-field slot-form-entities-wrap" data-slot-form="entities-wrap" style="display: none;">\n    <label class="slot-form-label">\n      <ha-icon icon="mdi:format-list-checks"></ha-icon>\n      <span>Apply to entities</span>\n    </label>\n    <div class="slot-form-entities-trigger" data-slot-form="entities-trigger" tabindex="0" role="combobox">\n      <div class="slot-form-entities-chips" data-slot-form="entities-chips"></div>\n      <ha-icon class="slot-form-entities-caret" icon="mdi:chevron-down"></ha-icon>\n    </div>\n    <div class="slot-form-entities-dropdown" data-slot-form="entities-dropdown">\n      <label class="slot-form-entity-row slot-form-entities-select-all-row">\n        <input type="checkbox" class="slot-form-entities-select-all" data-slot-form="entities-select-all">\n        <span class="slot-form-entity-name">Select all</span>\n      </label>\n      <div class="entities-selector-list"></div>\n      <template class="entities-selector-row-tpl">\n        <label class="entities-selector-row">\n          <input type="checkbox" name="entities-selector-entity" value="">\n          <span class="entities-selector-entity-name"></span>\n        </label>\n      </template>\n    </div>\n  </div>\n\n  <div class="slot-form-row slot-form-row-mode-fan-temp">\n    <div class="slot-form-field slot-form-field-mode" data-slot-form="field-mode">\n      <label class="slot-form-label">\n        <ha-icon icon="mdi:thermostat"></ha-icon>\n        <span>Mode</span>\n      </label>\n      <select class="homie-select slot-form-mode-select" data-slot-form="mode" data-action="update-hvac-mode" data-item-id="{{ITEM_ID}}">\n        {{HVAC_MODE_OPTIONS}}\n      </select>\n      <div class="slot-form-mode-warning" data-slot-form="mode-warning"></div>\n    </div>\n    <div class="slot-form-field slot-form-field-fan" data-slot-form="field-fan">\n      <label class="slot-form-label">\n        <ha-icon icon="mdi:fan"></ha-icon>\n        <span>Fan</span>\n      </label>\n      <select class="homie-select slot-form-fan-select" data-slot-form="fan" data-item-id="{{ITEM_ID}}">\n        {{FAN_OPTIONS}}\n      </select>\n    </div>\n    <div class="slot-form-field slot-form-field-temp" data-slot-form="field-temp">\n      <label class="slot-form-label">\n        <ha-icon icon="mdi:thermometer"></ha-icon>\n        <span>Temp °C</span>\n      </label>\n      <input type="number" class="homie-input slot-form-temp-input" data-slot-form="temp" data-item-id="{{ITEM_ID}}" min="{{TEMP_MIN}}" max="{{TEMP_MAX}}" step="0.5" value="{{TEMP_VALUE}}" placeholder="—">\n    </div>\n  </div>\n\n  <div class="slot-form-field" data-slot-form="field-duration">\n    <div class="slot-form-duration-row popup-field-row">\n      <label class="slot-form-field-row-label popup-field-row-label">\n        <ha-icon icon="mdi:timer-outline"></ha-icon>\n        <span>{{DURATION_LABEL}}</span>\n      </label>\n      <ha-switch class="slot-form-duration-enabled" data-slot-form="duration-enabled"></ha-switch>\n    </div>\n    <div class="slot-form-duration-wrapper" data-slot-form="duration-wrapper" style="display: none; margin-top: 8px;">\n      <div class="duration-selector-wrapper">\n        <input type="range" class="duration-slider" data-action="update-duration-slider" data-item-id="{{ITEM_ID}}" min="{{DURATION_MIN}}" max="{{DURATION_MAX}}" step="0.5" value="{{DURATION_VALUE}}" />\n        <input type="number" class="duration-input homie-input" data-action="update-duration" data-item-id="{{ITEM_ID}}" min="{{DURATION_MIN}}" max="{{DURATION_MAX}}" step="0.5" value="{{DURATION_VALUE}}" />\n      </div>\n    </div>\n  </div>\n\n  <div class="slot-form-field" data-slot-form="field-weekdays">\n    <label class="slot-form-label">\n      <ha-icon icon="mdi:calendar"></ha-icon>\n      <span>Days of Week</span>\n    </label>\n    <div class="weekday-mode-selector">\n      <button type="button" class="weekday-mode-btn active" data-mode="everyday">Everyday</button>\n      <button type="button" class="weekday-mode-btn" data-mode="weekdays">Weekdays</button>\n      <button type="button" class="weekday-mode-btn" data-mode="custom">Custom</button>\n    </div>\n    <div class="popup-weekdays hidden" id="popup-weekdays-custom">\n      <div class="popup-weekday" data-day="0">Mon</div>\n      <div class="popup-weekday" data-day="1">Tue</div>\n      <div class="popup-weekday" data-day="2">Wed</div>\n      <div class="popup-weekday" data-day="3">Thu</div>\n      <div class="popup-weekday" data-day="4">Fri</div>\n      <div class="popup-weekday" data-day="5">Sat</div>\n      <div class="popup-weekday" data-day="6">Sun</div>\n    </div>\n  </div>\n</div>\n<!-- END:slot-form-fields -->\n      <button class="slot-delete" data-action="delete-item">\n        <ha-icon icon="mdi:delete"></ha-icon>\n        <span>Remove {{SLOT_NAME_REMOVE}}</span>\n      </button>\n    </div>\n  </div>\n</template>\n`;
     return this._htmlTemplate;
   }
 
@@ -1000,36 +893,15 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         icon: config.icon || 'mdi:toggle-switch-variant-off'
       };
       
-      // Normalize duration configuration
-      // Support both duration_range: [min, max] and separate min_duration/max_duration
-      // Duration is optional for climate cards, but if specified, normalize it
-      if (config.duration_range && Array.isArray(config.duration_range) && config.duration_range.length === 2) {
-        this._config.min_duration = config.duration_range[0];
-        this._config.max_duration = config.duration_range[1];
-      } else {
-        // Fallback to defaults if not specified
-        this._config.min_duration = config.min_duration || 15;
-        this._config.max_duration = config.max_duration || 1440;
-      }
-      // duration_step fallback
-      this._config.duration_step = config.duration_step || 15;
-      
+      this._normalizeDurationConfig(config, this._config);
       this._configError = null;
       if (this._hass && this.shadowRoot) {
         this.render().catch(err => {});
       }
     } catch (err) {
       // Never throw from setConfig - it breaks the editor
-      this._config = config || {};
-      // Duration configuration defaults with fallback
-      if (config?.duration_range && Array.isArray(config.duration_range) && config.duration_range.length === 2) {
-        this._config.min_duration = config.duration_range[0];
-        this._config.max_duration = config.duration_range[1];
-      } else {
-        this._config.min_duration = this._config.min_duration || 15;
-        this._config.max_duration = this._config.max_duration || 1440;
-      }
-      this._config.duration_step = this._config.duration_step || 15;
+      this._config = config ? { ...config } : {};
+      this._normalizeDurationConfig(this._config, this._config);
       this._configError = 'Configuration error';
       if (this.shadowRoot) {
         this._showError('Configuration error. Please check card settings.');
@@ -1038,23 +910,25 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
   }
   
   _showError(message) {
-    // Ensure shadowRoot exists (should be created in constructor, but check anyway)
     if (!this.shadowRoot) {
       try {
         this.attachShadow({ mode: 'open' });
       } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): attachShadow failed', e);
         return;
       }
     }
-    
+    const raw = String(message != null ? message : '');
+    const safeMessage = (window.ScheduleHelper && typeof window.ScheduleHelper.escapeHtml === 'function')
+      ? window.ScheduleHelper.escapeHtml(raw)
+      : raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const errorHtml = `
       <div style="padding: 16px; text-align: center; color: var(--error-color, #f44336);">
         <ha-icon icon="mdi:alert-circle" style="font-size: 48px; margin-bottom: 16px;"></ha-icon>
         <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">Configuration Error</div>
-        <div style="font-size: 14px; color: var(--secondary-text-color, #888);">${message}</div>
+        <div style="font-size: 14px; color: var(--secondary-text-color, #888);">${safeMessage}</div>
       </div>
     `;
-    
     this.shadowRoot.innerHTML = errorHtml;
   }
 
@@ -1133,8 +1007,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
             // Store the unsubscribe function once Promise resolves
             this._unsubStateChanged = unsubscribeFn;
           }).catch((e) => {
+            if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): subscribeStateChanged failed', e);
           });
         } catch (e) {
+          if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): subscribeStateChanged setup failed', e);
         }
       }
       
@@ -1245,7 +1121,9 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         this._entryId = firstBridgeSensor.entryId;return;
       }
     
-    } catch (err) {}
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): _resolveBridgeSensor failed', err);
+    }
   }
 
   _getBridgeState() {
@@ -1382,6 +1260,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       
       const hour = parseInt(timeMatch[1], 10);
       const minute = parseInt(timeMatch[2], 10);
+      if (Number.isNaN(hour) || Number.isNaN(minute)) return null;
       
       // Try next 8 days (today + 7 more days)
       for (let dayOffset = 0; dayOffset < 8; dayOffset++) {
@@ -1455,7 +1334,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     let modePrefix = '';
     if (item && item.service_start && item.service_start.value && item.service_start.value.hvac_mode) {
       const hvacMode = item.service_start.value.hvac_mode;
-      modePrefix = `${hvacMode.charAt(0).toUpperCase() + hvacMode.slice(1)}, `;
+      modePrefix = `${this._formatHvacModeLabel(hvacMode)}, `;
     }
     
     // Duration suffix (from homie-schedule bridge sensor)
@@ -1515,20 +1394,14 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       
       // Check if it's a service not found error
       if (err.code === 3 || errorMsg.includes('not found') || errorMsg.includes('Unknown service')) {
-        alert('Integration service not available. Please check:\n1. Integration is installed\n2. Integration is enabled\n3. Home Assistant is restarted after integration installation');
+        console.warn('Homie Scheduler (climate): Integration service not available.', err.message || err);
       } else {
-        // Extract user-friendly error message
         let userMsg = errorMsg;
-        // Remove technical details if present
-        if (userMsg.includes('for dictionary value')) {
-          userMsg = userMsg.split('for dictionary value')[0].trim();
-        }
-        // Remove old validation messages
+        if (userMsg.includes('for dictionary value')) userMsg = userMsg.split('for dictionary value')[0].trim();
         if (userMsg.includes('[30, 60]')) {
-          userMsg = userMsg.replace(/\[30, 60\]/g, '');
-          userMsg = userMsg.replace(/value must be one of/, 'Invalid duration value');
+          userMsg = userMsg.replace(/\[30, 60\]/g, '').replace(/value must be one of/, 'Invalid duration value');
         }
-        alert(`Error: ${userMsg}`);
+        console.warn('Homie Scheduler (climate):', userMsg, err);
       }
     }
   }
@@ -1571,7 +1444,9 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       if (this._bridgeSensor) {
         try {
           await this._hass.callService('homeassistant', 'update_entity', { entity_id: this._bridgeSensor });
-        } catch (e) {}
+        } catch (e) {
+          if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): update_entity after enable-all failed', e);
+        }
       }
       try {
         await this._hass.callService('switch', 'turn_on', { entity_id: SCHEDULER_SWITCH_ENTITY });
@@ -1617,49 +1492,111 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     if (this._hass && this._bridgeSensor) {
       try {
         await this._hass.callService('homeassistant', 'update_entity', { entity_id: this._bridgeSensor });
-      } catch (e) {}
+      } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): update_entity after toggle failed', e);
+      }
       setTimeout(() => { if (this._hass) this.hass = { ...this._hass }; }, 500);
     }
+  }
+
+  /** Form root for Add Slot popup (shared form fragment). */
+  _getAddFormRoot() {
+    const popup = this.shadowRoot.getElementById('add-popup');
+    if (!popup) return null;
+    return popup.querySelector('[data-slot-form="root"]') || popup;
+  }
+
+  /** Entities wrap in Add Slot popup. */
+  _getAddFormEntitiesWrap() {
+    return this._getAddFormRoot()?.querySelector('[data-slot-form="entities-wrap"]') || null;
+  }
+
+  /** Get selected entity IDs from any entities-wrap (add popup or slot edit). */
+  _getSelectedEntityIdsFromWrap(wrap, fallbackIds) {
+    if (!wrap) return fallbackIds || [];
+    const listEl = wrap.querySelector('.entities-selector-list');
+    if (!listEl) return fallbackIds || [];
+    const checked = listEl.querySelectorAll('input[name="entities-selector-entity"]:checked');
+    return Array.from(checked).map(el => el.value);
   }
 
   _getPopupSelectedEntityIds() {
     const entities = this._getEntities();
     if (entities.length === 0) return [];
-    const container = this.shadowRoot.getElementById('popup-entities-container');
-    if (container && container.style.display !== 'none') {
-      const listEl = container.querySelector('.entities-selector-list');
-      if (listEl) {
-        const checked = listEl.querySelectorAll('input[name="entities-selector-entity"]:checked');
-        return Array.from(checked).map(el => el.value);
-      }
+    const wrap = this._getAddFormEntitiesWrap();
+    if (wrap && wrap.style.display !== 'none') {
+      return this._getSelectedEntityIdsFromWrap(wrap, entities);
     }
     return entities;
   }
 
-  _updateHvacModeWarning() {
-    const warningEl = this.shadowRoot.getElementById('popup-hvac-mode-warning');
-    const hvacModeSelect = this.shadowRoot.getElementById('popup-hvac-mode');
-    const container = this.shadowRoot.getElementById('popup-entities-container');
-    const listEl = container ? container.querySelector('.entities-selector-list') : null;
-    if (!warningEl || !hvacModeSelect || !this._hass) return;
-    const mode = hvacModeSelect.value;
+  /** Returns intersection of hvac_modes for all given entity ids. */
+  _getCommonHvacModes(entityIds) {
+    if (!this._hass || !entityIds || entityIds.length === 0) return [];
+    let common = null;
+    for (const eid of entityIds) {
+      const state = this._hass.states[eid];
+      const modes = state?.attributes?.hvac_modes;
+      if (!Array.isArray(modes) || modes.length === 0) return [];
+      const set = new Set(modes);
+      if (common === null) common = set;
+      else common = new Set([...common].filter(m => set.has(m)));
+    }
+    return common ? [...common] : [];
+  }
+
+  /** Refill Mode dropdown from intersection of hvac_modes of selected entities in wrap (add popup or slot edit). */
+  _updateModeOptionsForWrap(wrap, modeSelectEl, opts = {}) {
+    if (!modeSelectEl || !this._hass) return;
+    const fallback = wrap && wrap.getAttribute('data-slot-form') === 'entities-wrap' ? this._getEntities() : [];
+    const selectedIds = this._getSelectedEntityIdsFromWrap(wrap, fallback);
+    const commonModes = this._getCommonHvacModes(selectedIds);
+    const currentValue = modeSelectEl.value;
+    modeSelectEl.innerHTML = '';
+    if (commonModes.length === 0) {
+      modeSelectEl.appendChild(new Option('Off', 'off'));
+      modeSelectEl.value = 'off';
+    } else {
+      commonModes.forEach(mode => {
+        const option = document.createElement('option');
+        option.value = mode;
+        option.textContent = this._formatHvacModeLabel(mode);
+        modeSelectEl.appendChild(option);
+      });
+      const keepCurrent = commonModes.includes(currentValue);
+      modeSelectEl.value = keepCurrent ? currentValue : commonModes[0];
+    }
+    if (opts.syncDurationVisibility) this._syncPopupDurationVisibility();
+  }
+
+  _updatePopupModeOptions() {
+    const wrap = this._getAddFormEntitiesWrap();
+    const hvacModeSelect = this._getAddFormRoot()?.querySelector('[data-slot-form="mode"]');
+    this._updateModeOptionsForWrap(wrap, hvacModeSelect, { syncDurationVisibility: true });
+  }
+
+  /** Update mode warning and row states for any entities-wrap (add popup or slot edit). warningEl may be null (slot has no warning). */
+  _updateModeWarningForWrap(wrap, modeSelectEl, warningEl) {
+    if (!modeSelectEl || !this._hass) return;
+    const listEl = wrap ? wrap.querySelector('.entities-selector-list') : null;
+    const mode = modeSelectEl.value;
     if (!mode) {
-      warningEl.textContent = '';
+      if (warningEl) warningEl.textContent = '';
       if (listEl) listEl.querySelectorAll('.entities-selector-row').forEach(row => { row.classList.remove('entities-selector-row-unsupported'); const inp = row.querySelector('input'); if (inp) inp.disabled = false; });
       return;
     }
     const entities = this._getEntities();
-    const unsupportedNames = [];
+    const fallback = wrap && wrap.getAttribute('data-slot-form') === 'entities-wrap' ? entities : [];
+    const selectedIds = this._getSelectedEntityIdsFromWrap(wrap, fallback);
     const unsupportedIds = new Set();
     entities.forEach(entityId => {
       const state = this._hass.states[entityId];
       const modes = state?.attributes?.hvac_modes;
-      if (Array.isArray(modes) && !modes.includes(mode)) {
-        unsupportedIds.add(entityId);
-        const name = state?.attributes?.friendly_name || entityId;
-        unsupportedNames.push(name);
-      }
+      if (Array.isArray(modes) && !modes.includes(mode)) unsupportedIds.add(entityId);
     });
+    const unsupportedNames = selectedIds
+      .filter(eid => unsupportedIds.has(eid))
+      .map(eid => this._hass.states[eid]?.attributes?.friendly_name || eid);
     if (listEl) {
       listEl.querySelectorAll('.entities-selector-row').forEach(row => {
         const input = row.querySelector('input[name="entities-selector-entity"]');
@@ -1671,15 +1608,13 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         if (unsupported) input.checked = false;
       });
     }
-    if (unsupportedNames.length === 0) {
-      warningEl.textContent = '';
-    } else {
-      warningEl.textContent = unsupportedNames.length === 1
+    if (warningEl) {
+      warningEl.textContent = unsupportedNames.length === 0 ? '' : (unsupportedNames.length === 1
         ? `This mode is not supported for: ${unsupportedNames[0]}`
-        : `This mode is not supported for: ${unsupportedNames.join(', ')}`;
+        : `This mode is not supported for: ${unsupportedNames.join(', ')}`);
     }
-    this._updateEntitiesChips();
-    const selectAll = this.shadowRoot.getElementById('popup-entities-select-all');
+    this._updateEntityChipsForWrap(wrap, { updateSlotTitle: !!wrap?.closest?.('.slot-card') });
+    const selectAll = wrap?.querySelector?.('.slot-form-entities-select-all');
     if (listEl && selectAll) {
       const all = listEl.querySelectorAll('.entities-selector-row:not(.entities-selector-row-unsupported) input[name="entities-selector-entity"]');
       const checkedCount = Array.from(all).filter(inp => inp.checked).length;
@@ -1688,31 +1623,38 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
   }
 
-  _updateEntitiesChips() {
-    const chipsEl = this.shadowRoot.getElementById('popup-entities-chips');
-    if (!chipsEl) return;
-    const container = this.shadowRoot.getElementById('popup-entities-container');
-    const listEl = container ? container.querySelector('.entities-selector-list') : null;
-    if (!listEl) return;
-    const checked = listEl.querySelectorAll('input[name="entities-selector-entity"]:checked');
-    const names = Array.from(checked).map(input => {
-      const row = input.closest('.entities-selector-row');
-      const nameEl = row && row.querySelector('.entities-selector-entity-name');
-      return nameEl ? nameEl.textContent : input.value;
-    });
-    chipsEl.innerHTML = '';
-    names.forEach(name => {
-      const chip = document.createElement('span');
-      chip.className = 'popup-entity-chip';
-      chip.textContent = name;
-      chipsEl.appendChild(chip);
-    });
+  _updateHvacModeWarning() {
+    const root = this._getAddFormRoot();
+    const wrap = this._getAddFormEntitiesWrap();
+    const hvacModeSelect = root?.querySelector('[data-slot-form="mode"]');
+    const warningEl = root?.querySelector('[data-slot-form="mode-warning"]');
+    this._updateModeWarningForWrap(wrap, hvacModeSelect, warningEl);
   }
 
-  _updateSlotEntitiesChips(slotEntitiesWrap) {
-    if (!slotEntitiesWrap) return;
-    const chipsEl = slotEntitiesWrap.querySelector('.slot-entities-chips');
-    const listEl = slotEntitiesWrap.querySelector('.entities-selector-list');
+  /** When mode is 'off', hide duration in add-popup and clear it (schedule turn-off only). */
+  _syncPopupDurationVisibility() {
+    const root = this._getAddFormRoot();
+    const hvacModeSelect = root?.querySelector('[data-slot-form="mode"]');
+    const durationWrapper = root?.querySelector('[data-slot-form="duration-wrapper"]');
+    const durationEnabledCheckbox = root?.querySelector('[data-slot-form="duration-enabled"]');
+    if (!hvacModeSelect || !durationWrapper) return;
+    const popupDurationField = durationWrapper.closest('.slot-form-field');
+    if (!popupDurationField) return;
+    if (hvacModeSelect.value === 'off') {
+      popupDurationField.style.display = 'none';
+      if (durationEnabledCheckbox) durationEnabledCheckbox.checked = false;
+      durationWrapper.style.display = 'none';
+      if (window.DurationSelector) DurationSelector.reset(this.shadowRoot, null);
+    } else {
+      popupDurationField.style.display = '';
+    }
+  }
+
+  /** Update chips (and optional slot title) for any entities-wrap (add popup or slot edit). */
+  _updateEntityChipsForWrap(wrap, opts = {}) {
+    if (!wrap) return;
+    const chipsEl = wrap.querySelector('.slot-form-entities-chips');
+    const listEl = wrap.querySelector('.entities-selector-list');
     if (!chipsEl || !listEl) return;
     const checked = listEl.querySelectorAll('input[name="entities-selector-entity"]:checked');
     const names = Array.from(checked).map(input => {
@@ -1727,68 +1669,58 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       chip.textContent = name;
       chipsEl.appendChild(chip);
     });
-    this._updateSlotTitleFromEntities(slotEntitiesWrap, names);
+    if (opts.updateSlotTitle) this._updateSlotTitleFromEntities(wrap, names);
   }
 
-  /** Update slot header name and remove button text to match current entity selection and optional custom title. */
+  _updateEntitiesChips() {
+    this._updateEntityChipsForWrap(this._getAddFormEntitiesWrap());
+  }
+
+  _updateSlotEntitiesChips(slotEntitiesWrap) {
+    this._updateEntityChipsForWrap(slotEntitiesWrap, { updateSlotTitle: true });
+  }
+
+  /** Update slot header name and remove button text only when entity list changes; clear first to avoid duplication. */
   _updateSlotTitleFromEntities(slotEntitiesWrap, entityNames) {
     if (!slotEntitiesWrap) return;
     const slotCard = slotEntitiesWrap.closest('.slot-card');
     if (!slotCard) return;
+    const nameEl = slotCard.querySelector('.slot-name');
+    const removeSpan = slotCard.querySelector('.slot-delete span');
+    if (nameEl) nameEl.textContent = '';
+    if (removeSpan) removeSpan.textContent = '';
     const slotCards = this.shadowRoot.querySelectorAll('.slot-card');
     const slotNumber = slotCards.length ? Array.from(slotCards).indexOf(slotCard) + 1 : 1;
     const entityLabel = (entityNames && entityNames.length > 0) ? entityNames.join(', ') : '';
-    const titleInput = slotCard.querySelector('.slot-title-input');
+    const titleInput = slotCard.querySelector('[data-slot-form="title"]');
     const baseName = (titleInput && titleInput.value.trim()) || `Slot ${slotNumber}`;
     const slotName = baseName + (entityLabel ? ` (${entityLabel})` : '');
-    const nameEl = slotCard.querySelector('.slot-name');
     if (nameEl) nameEl.textContent = slotName;
-    const removeSpan = slotCard.querySelector('.slot-delete span');
     if (removeSpan) removeSpan.textContent = 'Remove ' + baseName;
   }
 
+  /** Slot edit: delegate to shared mode warning (row states + chips + selectAll). */
   _updateSlotEntitiesForMode(slotEntitiesWrap, itemEl) {
-    if (!slotEntitiesWrap || !this._hass) return;
-    const listEl = slotEntitiesWrap.querySelector('.entities-selector-list');
-    const hvacSelect = itemEl.querySelector('[data-action="update-hvac-mode"]');
-    const mode = hvacSelect && hvacSelect.value ? hvacSelect.value : null;
-    if (!listEl || !mode) return;
-    listEl.querySelectorAll('.entities-selector-row').forEach(row => {
-      const input = row.querySelector('input[name="entities-selector-entity"]');
-      if (!input) return;
-      const entityId = input.value;
-      const state = this._hass.states[entityId];
-      const modes = state?.attributes?.hvac_modes;
-      const unsupported = Array.isArray(modes) && !modes.includes(mode);
-      row.classList.toggle('entities-selector-row-unsupported', unsupported);
-      input.disabled = !!unsupported;
-      if (unsupported) input.checked = false;
-    });
-    this._updateSlotEntitiesChips(slotEntitiesWrap);
-    const selectAllInput = slotEntitiesWrap.querySelector('.slot-entities-select-all-input');
-    if (selectAllInput && listEl) {
-      const all = listEl.querySelectorAll('input[name="entities-selector-entity"]:not(:disabled)');
-      const checkedCount = Array.from(all).filter(inp => inp.checked).length;
-      selectAllInput.checked = all.length > 0 && checkedCount === all.length;
-      selectAllInput.indeterminate = checkedCount > 0 && checkedCount < all.length;
-    }
+    const hvacSelect = itemEl?.querySelector?.('[data-slot-form="mode"]');
+    this._updateModeWarningForWrap(slotEntitiesWrap, hvacSelect, null);
   }
 
   _entitiesDropdownCloseOnOutside(e) {
-    const container = this.shadowRoot.getElementById('popup-entities-container');
-    const dropdown = this.shadowRoot.getElementById('popup-entities-dropdown');
-    const trigger = this.shadowRoot.getElementById('popup-entities-trigger');
-    if (!container || !dropdown || !trigger) return;
-    if (container.contains(e.target)) return;
+    const wrap = this._getAddFormEntitiesWrap();
+    const dropdown = wrap?.querySelector('[data-slot-form="entities-dropdown"]');
+    const trigger = wrap?.querySelector('[data-slot-form="entities-trigger"]');
+    if (!dropdown || !trigger) return;
+    if (dropdown.contains(e.target) || trigger.contains(e.target)) return;
     dropdown.classList.remove('open');
     trigger.classList.remove('open');
     document.removeEventListener('click', this._boundEntitiesCloseOnOutside);
   }
 
   _attachEntitiesDropdownListeners() {
-    const trigger = this.shadowRoot.getElementById('popup-entities-trigger');
-    const dropdown = this.shadowRoot.getElementById('popup-entities-dropdown');
-    const selectAll = this.shadowRoot.getElementById('popup-entities-select-all');
+    const wrap = this._getAddFormEntitiesWrap();
+    const trigger = wrap?.querySelector('[data-slot-form="entities-trigger"]');
+    const dropdown = wrap?.querySelector('[data-slot-form="entities-dropdown"]');
+    const selectAll = wrap?.querySelector('[data-slot-form="entities-select-all"]');
     const listEl = dropdown ? dropdown.querySelector('.entities-selector-list') : null;
     if (!trigger || !dropdown) return;
 
@@ -1804,12 +1736,18 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       }
     };
 
+    if (!dropdown._entitiesClickStopped) {
+      dropdown.addEventListener('click', (e) => e.stopPropagation());
+      dropdown._entitiesClickStopped = true;
+    }
     if (selectAll && listEl) {
       selectAll.closest('label').onclick = (e) => e.stopPropagation();
       selectAll.onchange = () => {
         const checked = selectAll.checked;
         listEl.querySelectorAll('.entities-selector-row input[name="entities-selector-entity"]:not([disabled])').forEach(inp => { inp.checked = checked; });
         this._updateEntitiesChips();
+        this._updatePopupModeOptions();
+        this._updateHvacModeWarning();
       };
     }
     if (listEl) {
@@ -1822,6 +1760,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
             selectAll.indeterminate = checkedCount > 0 && checkedCount < all.length;
           }
           this._updateEntitiesChips();
+          this._updatePopupModeOptions();
           this._updateHvacModeWarning();
         });
       });
@@ -1830,15 +1769,18 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
   _openAddPopup() {
     const popup = this.shadowRoot.getElementById('add-popup');
-    if (popup) {
+    const root = this._getAddFormRoot();
+    if (popup && root) {
+      this._clearAddPopupError();
       popup.style.display = 'flex';
-      const hoursSelect = this.shadowRoot.getElementById('popup-time-hours');
-      const minutesSelect = this.shadowRoot.getElementById('popup-time-minutes');
-      const hvacModeSelect = this.shadowRoot.getElementById('popup-hvac-mode');
-      const durationEnabledCheckbox = this.shadowRoot.getElementById('popup-duration-enabled');
-      const durationWrapper = this.shadowRoot.getElementById('popup-duration-wrapper');
-      const entitiesContainer = this.shadowRoot.getElementById('popup-entities-container');
-      const entitiesList = this.shadowRoot.getElementById('popup-entities');
+      const hoursSelect = root.querySelector('[data-slot-form="time-hours"]');
+      const minutesSelect = root.querySelector('[data-slot-form="time-minutes"]');
+      const hvacModeSelect = root.querySelector('[data-slot-form="mode"]');
+      const durationEnabledCheckbox = root.querySelector('[data-slot-form="duration-enabled"]');
+      const durationWrapper = root.querySelector('[data-slot-form="duration-wrapper"]');
+      const entitiesWrap = root.querySelector('[data-slot-form="entities-wrap"]');
+      const titleInput = root.querySelector('[data-slot-form="title"]');
+      if (titleInput) titleInput.value = '';
       const now = new Date();
       const hour = String(now.getHours()).padStart(2, '0');
       const minute = String(Math.round(now.getMinutes() / 5) * 5).padStart(2, '0');
@@ -1849,15 +1791,14 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       DurationSelector.reset(this.shadowRoot, null);
 
       const entities = this._getEntities();
-      const dropdown = this.shadowRoot.getElementById('popup-entities-dropdown');
+      const dropdown = entitiesWrap?.querySelector('[data-slot-form="entities-dropdown"]');
       if (dropdown && entities.length > 1) {
-        entitiesContainer.style.display = '';
-        const trigger = this.shadowRoot.getElementById('popup-entities-trigger');
+        entitiesWrap.style.display = '';
+        const trigger = entitiesWrap.querySelector('[data-slot-form="entities-trigger"]');
         if (trigger) trigger.classList.remove('open');
         dropdown.classList.remove('open');
-        const selectAllInput = this.shadowRoot.getElementById('popup-entities-select-all');
+        const selectAllInput = entitiesWrap.querySelector('[data-slot-form="entities-select-all"]');
         if (selectAllInput) { selectAllInput.checked = true; selectAllInput.indeterminate = false; }
-        const hvacModeSelect = this.shadowRoot.getElementById('popup-hvac-mode');
         const isEntityDisabled = (entityId) => {
           if (!hvacModeSelect || !hvacModeSelect.value || !this._hass) return false;
           const state = this._hass.states[entityId];
@@ -1869,43 +1810,105 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
             entities,
             checkedEntityIds: entities,
             hass: this._hass,
-            onCheck: () => { this._updateEntitiesChips(); this._updateHvacModeWarning(); },
-            onUncheck: () => { this._updateEntitiesChips(); this._updateHvacModeWarning(); },
+            onCheck: () => { this._updateEntitiesChips(); this._updatePopupModeOptions(); this._updateHvacModeWarning(); this._updateAddPopupFanAndTemp(); },
+            onUncheck: () => { this._updateEntitiesChips(); this._updatePopupModeOptions(); this._updateHvacModeWarning(); this._updateAddPopupFanAndTemp(); },
             isEntityDisabled
           });
         }
         this._updateEntitiesChips();
         this._updateHvacModeWarning();
         this._attachEntitiesDropdownListeners();
-      } else if (entitiesContainer) {
-        entitiesContainer.style.display = 'none';
+      } else if (entitiesWrap) {
+        entitiesWrap.style.display = 'none';
       }
 
-      if (hvacModeSelect && this._config?.entity && this._hass) {
-        const entityState = this._hass.states[this._config.entity];
-        if (entityState?.attributes?.hvac_modes) {
-          const hvacModes = entityState.attributes.hvac_modes.filter(mode => mode !== 'off');
-          hvacModeSelect.innerHTML = '';
-          hvacModes.forEach(mode => {
-            const option = document.createElement('option');
-            option.value = mode;
-            option.textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
-            hvacModeSelect.appendChild(option);
-          });
-          if (hvacModes.length > 0) hvacModeSelect.value = hvacModes[0];
-        }
-      }
+      this._updatePopupModeOptions();
       this._updateHvacModeWarning();
+      this._updateAddPopupFanAndTemp();
+      this._syncPopupDurationVisibility();
     }
+  }
+
+  _updateAddPopupFanAndTemp() {
+    const root = this._getAddFormRoot();
+    if (!root || !this._hass) return;
+    const selectedIds = this._getPopupSelectedEntityIds();
+    const entityId = selectedIds.length ? selectedIds[0] : this._getEntities()[0];
+    const fanSelect = root.querySelector('[data-slot-form="fan"]');
+    const tempInput = root.querySelector('[data-slot-form="temp"]');
+    if (!entityId) {
+      if (fanSelect) { fanSelect.innerHTML = '<option value="">—</option>'; fanSelect.value = ''; }
+      if (tempInput) { tempInput.min = 5; tempInput.max = 35; tempInput.value = 21; tempInput.placeholder = '—'; }
+      return;
+    }
+    const state = this._hass.states[entityId];
+    const attrs = state?.attributes || {};
+    if (fanSelect) {
+      const fanModes = attrs.fan_modes;
+      const escape = (window.ScheduleHelper && typeof window.ScheduleHelper.escapeHtml === 'function') ? (s) => window.ScheduleHelper.escapeHtml(s) : (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      if (Array.isArray(fanModes) && fanModes.length) {
+        fanSelect.innerHTML = fanModes.map(fm => {
+          const label = (fm || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          return `<option value="${escape(fm)}">${escape(label)}</option>`;
+        }).join('');
+        fanSelect.value = fanModes[0];
+      } else {
+        fanSelect.innerHTML = '<option value="">—</option>';
+        fanSelect.value = '';
+      }
+    }
+    if (tempInput) {
+      const min = attrs.min_temp != null ? attrs.min_temp : 5;
+      const max = attrs.max_temp != null ? attrs.max_temp : 35;
+      const val = attrs.temperature != null ? attrs.temperature : 21;
+      tempInput.min = min;
+      tempInput.max = max;
+      tempInput.step = attrs.target_temp_step ?? 0.5;
+      tempInput.value = Math.max(min, Math.min(max, val));
+      tempInput.placeholder = '—';
+    }
+  }
+
+  _showAddPopupError(message) {
+    const popup = this.shadowRoot?.getElementById('add-popup');
+    const errEl = popup?.querySelector('[data-slot-form="popup-error"]');
+    if (errEl) {
+      errEl.textContent = message;
+      errEl.style.display = '';
+    }
+  }
+
+  _clearAddPopupError() {
+    const popup = this.shadowRoot?.getElementById('add-popup');
+    const errEl = popup?.querySelector('[data-slot-form="popup-error"]');
+    if (errEl) {
+      errEl.textContent = '';
+      errEl.style.display = 'none';
+    }
+  }
+
+  /** True if two weekday arrays share at least one day. */
+  _weekdaysOverlap(a, b) {
+    const setA = new Set(a || []);
+    return (b || []).some(d => setA.has(d));
+  }
+
+  /** True if a slot already exists at (time) for any selected entity with at least one weekday overlapping. */
+  _hasAddSlotConflict(bridgeState, time, weekdays, selectedEntityIds) {
+    const allItems = bridgeState?.attributes?.items || [];
+    const entitySet = new Set(selectedEntityIds);
+    return allItems.some(i =>
+      i && !i.temporary && entitySet.has(i.entity_id) &&
+      i.time === time && this._weekdaysOverlap(weekdays, i.weekdays)
+    );
   }
 
   _closeAddPopup() {
     const popup = this.shadowRoot.getElementById('add-popup');
-    if (popup) {
-      popup.style.display = 'none';
-    }
-    const trigger = this.shadowRoot.getElementById('popup-entities-trigger');
-    const dropdown = this.shadowRoot.getElementById('popup-entities-dropdown');
+    if (popup) popup.style.display = 'none';
+    const wrap = this._getAddFormEntitiesWrap();
+    const trigger = wrap?.querySelector('[data-slot-form="entities-trigger"]');
+    const dropdown = wrap?.querySelector('[data-slot-form="entities-dropdown"]');
     if (trigger) trigger.classList.remove('open');
     if (dropdown) dropdown.classList.remove('open');
     if (this._boundEntitiesCloseOnOutside) {
@@ -1916,15 +1919,17 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
 
   async _saveSlot() {
-    const hoursSelect = this.shadowRoot.getElementById('popup-time-hours');
-    const minutesSelect = this.shadowRoot.getElementById('popup-time-minutes');
-    const hvacModeSelect = this.shadowRoot.getElementById('popup-hvac-mode');
-    const titleInput = this.shadowRoot.getElementById('popup-title');
-    const durationEnabledCheckbox = this.shadowRoot.getElementById('popup-duration-enabled');
-    const durationWrapper = this.shadowRoot.getElementById('popup-duration-wrapper');
-    const selectedDays = WeekdaySelector.getSelectedWeekdays(this.shadowRoot);
+    const popup = this.shadowRoot.getElementById('add-popup');
+    const root = popup?.querySelector('[data-slot-form="root"]') || popup;
+    if (!root) return;
+    const hoursSelect = root.querySelector('[data-slot-form="time-hours"]');
+    const minutesSelect = root.querySelector('[data-slot-form="time-minutes"]');
+    const hvacModeSelect = root.querySelector('[data-slot-form="mode"]');
+    const titleInput = root.querySelector('[data-slot-form="title"]');
+    const durationEnabledCheckbox = root.querySelector('[data-slot-form="duration-enabled"]');
+    const durationWrapper = root.querySelector('[data-slot-form="duration-wrapper"]');
+    const selectedDays = root ? WeekdaySelector.getSelectedWeekdays(root) : [];
     
-    // Get duration only if checkbox is enabled
     let duration = null;
     if (durationEnabledCheckbox && durationEnabledCheckbox.checked && durationWrapper) {
       duration = DurationSelector.getSelectedDuration(durationWrapper);
@@ -1932,32 +1937,48 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
     if (!hoursSelect || !minutesSelect) return;
     if (selectedDays.length === 0) {
-      alert('Please select at least one day');
+      console.warn('Homie Scheduler (climate): Please select at least one day');
       return;
     }
     
     if (!hvacModeSelect || !hvacModeSelect.value) {
-      alert('Please select an HVAC mode');
+      console.warn('Homie Scheduler (climate): Please select an HVAC mode');
       return;
     }
 
     const time = `${hoursSelect.value}:${minutesSelect.value}`;
     const hvacMode = hvacModeSelect.value;
     const title = titleInput?.value?.trim() || null;
+    // Duration from selector is in hours; API expects minutes
+    const durationValue = (hvacMode === 'off') ? null : (ScheduleHelper && ScheduleHelper.durationHoursToMinutes ? ScheduleHelper.durationHoursToMinutes(duration) : (duration != null && duration !== '' ? (() => { const h = parseFloat(duration); return Number.isNaN(h) ? null : Math.round(h * 60); })() : null));
 
     const entities = this._getEntities();
     if (!this._config || entities.length === 0) return;
 
     const selectedEntityIds = this._getPopupSelectedEntityIds();
     if (selectedEntityIds.length === 0) {
-      alert('Select at least one entity for this slot.');
+      console.warn('Homie Scheduler (climate): Please select at least one entity for this slot');
       return;
     }
 
-    const durationValue = duration && duration !== '' ? parseInt(duration) : null;
+    this._clearAddPopupError();
+
+    const bridgeState = this._getBridgeState();
+    if (this._hasAddSlotConflict(bridgeState, time, selectedDays, selectedEntityIds)) {
+      this._showAddPopupError('A slot already exists at this time and days for the selected entities.');
+      return;
+    }
+
+    const fanSelect = root.querySelector('[data-slot-form="fan"]');
+    const tempInput = root.querySelector('[data-slot-form="temp"]');
+    const fanMode = fanSelect?.value || undefined;
+    let temperature = undefined;
+    if (tempInput && tempInput.value !== '' && !Number.isNaN(Number(tempInput.value))) {
+      temperature = parseFloat(tempInput.value);
+    }
     const climateServicesByEntity = {};
     selectedEntityIds.forEach(eid => {
-      climateServicesByEntity[eid] = ScheduleHelper.createClimateServices(eid, hvacMode);
+      climateServicesByEntity[eid] = ScheduleHelper.createClimateServices(eid, hvacMode, { temperature, fan_mode: fanMode });
     });
 
     try {
@@ -2032,20 +2053,53 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         }
       }
     } catch (err) {
-      alert('Failed to add slot: ' + (err.message || err));
+      console.warn('Homie Scheduler (climate): Failed to add slot', err.message || err, err);
       return;
     }
 
     this._closeAddPopup();
   }
 
+  /** Normalize duration_range or min_duration/max_duration into target (climate: hours). */
+  _normalizeDurationConfig(source, target) {
+    if (!source || !target) return;
+    if (source.duration_range && Array.isArray(source.duration_range) && source.duration_range.length === 2) {
+      target.min_duration = source.duration_range[0];
+      target.max_duration = source.duration_range[1];
+    } else {
+      target.min_duration = source.min_duration ?? 0.5;
+      target.max_duration = source.max_duration ?? 12;
+    }
+    target.duration_step = source.duration_step ?? 0.5;
+  }
+
+  /** Duration config in hours: 0.5–12, step 0.5. Slider uses real hours (min..max). */
+  _getDurationConfig() {
+    const minDuration = this._config?.min_duration ?? 0.5;
+    const maxDuration = this._config?.max_duration ?? 12;
+    const durationStep = this._config?.duration_step ?? 0.5;
+    return { minDuration, maxDuration, durationStep };
+  }
+
+  /** Display label for HVAC mode: Heat_cool -> Auto, Fan_only -> Fan Only, other_with_underscore -> space + title case */
+  _formatHvacModeLabel(mode) {
+    if (!mode || typeof mode !== 'string') return mode || '';
+    const m = mode.toLowerCase();
+    if (m === 'heat_cool') return 'Auto';
+    if (mode.includes('_')) {
+      return mode.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
+    }
+    return mode.charAt(0).toUpperCase() + mode.slice(1);
+  }
+
   _formatTime(timeStr) {
-    // Convert 24h to 12h format for display
+    if (!timeStr || typeof timeStr !== 'string') return '';
     const [hours, minutes] = timeStr.split(':');
-    const h = parseInt(hours);
+    const h = parseInt(hours, 10);
+    if (Number.isNaN(h)) return timeStr;
     const ampm = h >= 12 ? 'PM' : 'AM';
     const h12 = h % 12 || 12;
-    return `${h12}:${minutes} ${ampm}`;
+    return `${h12}:${minutes || '00'} ${ampm}`;
   }
 
   async _addItem() {
@@ -2100,7 +2154,9 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         clearInterval(this._secondsTimer);
         this._secondsTimer = null;
       }
-    } catch (err) {}
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): _updateHeaderStatus failed', err);
+    }
   }
 
   _syncSlotsFromBridgeSensor() {
@@ -2128,7 +2184,9 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       
       // Also update header status
       this._updateHeaderStatus();
-    } catch (err) {}
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): _syncSlotsFromBridgeSensor failed', err);
+    }
   }
   
   _syncAllCardsForEntity(itemId = null, updatedItem = null, optimisticBridgeState = null) {
@@ -2179,19 +2237,21 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       let statusPrefix = updatedItem.enabled ? 'On' : 'Off';
       if (updatedItem.service_start && updatedItem.service_start.value && updatedItem.service_start.value.hvac_mode) {
         const hvacMode = updatedItem.service_start.value.hvac_mode;
-        statusPrefix = updatedItem.enabled ? hvacMode.charAt(0).toUpperCase() + hvacMode.slice(1) : 'Off';
+        statusPrefix = updatedItem.enabled ? this._formatHvacModeLabel(hvacMode) : 'Off';
       }
       
-      const durationStr = this._formatDuration(updatedItem.duration);
+      const showDuration = updatedItem.service_start?.value?.hvac_mode !== 'off';
+      const durationStr = showDuration ? this._formatDuration(updatedItem.duration) : '';
       const slotStatus = `${statusPrefix}, ${daysText} on ${updatedItem.time}${durationStr}`;
       statusEl.textContent = slotStatus;
     }
 
     // Update time selects
     const [hours, minutes] = updatedItem.time.split(':');
-    const roundedMinutes = String(Math.round(parseInt(minutes || 0) / 5) * 5).padStart(2, '0');
-    const hoursSelect = slotCard.querySelector('.slot-time-hours');
-    const minutesSelect = slotCard.querySelector('.slot-time-minutes');
+    const minsNum = parseInt(minutes, 10);
+    const roundedMinutes = String((Number.isNaN(minsNum) ? 0 : Math.round(minsNum / 5) * 5)).padStart(2, '0');
+    const hoursSelect = slotCard.querySelector('[data-slot-form="time-hours"]');
+    const minutesSelect = slotCard.querySelector('[data-slot-form="time-minutes"]');
     if (hoursSelect && hoursSelect.value !== hours) {
       hoursSelect.value = hours;
     }
@@ -2199,56 +2259,53 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       minutesSelect.value = roundedMinutes;
     }
 
-    // Update duration select (only if duration is set)
-    const durationEl = slotCard.querySelector('.slot-duration');
-    if (durationEl) {
-      if (updatedItem.duration) {
-        durationEl.style.display = '';
-        DurationSelector.setDurationInSlot(slotCard, updatedItem.duration, this._config);
-      } else {
-        durationEl.style.display = 'none';
+    // Duration: keep switch and wrapper in sync with item (only update when not focused in duration input)
+    const durationWrapper = slotCard.querySelector('[data-slot-form="duration-wrapper"]');
+    const durationEnabledSwitch = slotCard.querySelector('[data-slot-form="duration-enabled"]');
+    const currentHvacMode = updatedItem.service_start?.value?.hvac_mode;
+    const hasDuration = currentHvacMode !== 'off' && updatedItem.duration != null;
+    // Avoid unnecessary programmatic updates that can emit change on ha-switch.
+    if (durationEnabledSwitch && durationEnabledSwitch.checked !== !!hasDuration) {
+      durationEnabledSwitch.checked = !!hasDuration;
+    }
+    if (durationWrapper) {
+      durationWrapper.style.display = hasDuration ? 'block' : 'none';
+      if (hasDuration) {
+        const durationInput = durationWrapper.querySelector('[data-action="update-duration"]');
+        const activeEl = this.shadowRoot && this.shadowRoot.activeElement;
+        if (!durationInput || activeEl !== durationInput) {
+          DurationSelector.setDurationInSlot(slotCard, updatedItem.duration != null ? (ScheduleHelper && ScheduleHelper.durationMinutesToHours ? ScheduleHelper.durationMinutesToHours(updatedItem.duration) : updatedItem.duration / 60) : null, this._config);
+        }
       }
     }
 
     // Update HVAC mode select - use data-action selector to match template
-    const hvacModeSelect = slotCard.querySelector('[data-action="update-hvac-mode"]');
+    const hvacModeSelect = slotCard.querySelector('[data-slot-form="mode"]');
     if (hvacModeSelect) {
       const currentHvacMode = updatedItem.service_start?.value?.hvac_mode;
       if (currentHvacMode && hvacModeSelect.value !== currentHvacMode) {
         hvacModeSelect.value = currentHvacMode;
-        // Trigger input event for visual update without change event
         hvacModeSelect.dispatchEvent(new Event('input', { bubbles: false }));
       }
+    }
+
+    // Update Fan and Temp from service_start
+    const fanSelect = slotCard.querySelector('[data-slot-form="fan"]');
+    if (fanSelect && updatedItem.service_start?.value?.fan_mode != null) {
+      if (fanSelect.querySelector(`option[value="${updatedItem.service_start.value.fan_mode}"]`)) {
+        fanSelect.value = updatedItem.service_start.value.fan_mode;
+      }
+    }
+    const tempInput = slotCard.querySelector('[data-slot-form="temp"]');
+    if (tempInput && updatedItem.service_start?.value?.temperature != null) {
+      const t = Number(updatedItem.service_start.value.temperature);
+      if (!Number.isNaN(t)) tempInput.value = t;
     }
 
     // Update weekday selector state
     WeekdaySelector.setSelectedWeekdays(this.shadowRoot, updatedItem.weekdays, slotCard);
 
-    // Update slot title input and slot name in header
-    const titleInput = slotCard.querySelector('.slot-title-input');
-    if (titleInput && titleInput.value !== (updatedItem.title || '')) {
-      titleInput.value = updatedItem.title || '';
-    }
-    const slotNameEl = slotCard.querySelector('.slot-name');
-    const removeSpan = slotCard.querySelector('.slot-delete span');
-    if (slotNameEl || removeSpan) {
-      const entities = this._getEntities();
-      const bridgeState = this._getBridgeState();
-      const allItems = bridgeState?.attributes?.items || [];
-      const entitySet = new Set(entities);
-      const sameSlotItems = allItems.filter(i =>
-        i && i.temporary !== true && entitySet.has(i.entity_id) &&
-        i.time === updatedItem.time && JSON.stringify(i.weekdays || []) === JSON.stringify(updatedItem.weekdays || [])
-      );
-      const entityLabel = sameSlotItems.length > 0
-        ? sameSlotItems.map(i => this._hass?.states?.[i.entity_id]?.attributes?.friendly_name || i.entity_id).join(', ')
-        : '';
-      const slotNumber = Array.from(this.shadowRoot.querySelectorAll('.slot-card')).indexOf(slotCard) + 1;
-      const baseName = updatedItem.title || `Slot ${slotNumber}`;
-      const slotName = baseName + (entityLabel ? ` (${entityLabel})` : '');
-      if (slotNameEl) slotNameEl.textContent = slotName;
-      if (removeSpan) removeSpan.textContent = 'Remove ' + baseName;
-    }
+    // Do not update slot title input from state here — leave whatever the user typed (including trailing space) so editing is not interrupted by trim
 
     // Update icon and card classes (scheduler must be on for slot to show as enabled)
     const schedulerOn = this._isSchedulerEnabled();
@@ -2283,18 +2340,64 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     return sameSlot.map(i => i.id).filter(Boolean);
   }
 
+  /** True if another slot (different items) exists at (newTime) for the same entity with at least one weekday overlapping. */
+  _hasSlotConflictForEdit(bridgeState, itemId, newTime, newWeekdays) {
+    const allItems = bridgeState?.attributes?.items || [];
+    if (!allItems.length) return false;
+    const itemIdsInThisSlot = this._getSameSlotItemIds(bridgeState, itemId);
+    const entityIdsInThisSlot = new Set(
+      allItems.filter(i => i && itemIdsInThisSlot.includes(i.id)).map(i => i.entity_id).filter(Boolean)
+    );
+    const hasOtherSlot = allItems.some(i =>
+      i && !i.temporary && entityIdsInThisSlot.has(i.entity_id) &&
+      i.time === newTime && this._weekdaysOverlap(newWeekdays, i.weekdays) &&
+      !itemIdsInThisSlot.includes(i.id)
+    );
+    return hasOtherSlot;
+  }
+
+  _showSlotError(itemId, message) {
+    const slotCard = this.shadowRoot?.querySelector(`[data-item-id="${itemId}"]`);
+    const errEl = slotCard?.querySelector('[data-slot-error]');
+    if (errEl) {
+      errEl.textContent = message;
+      errEl.style.display = '';
+    }
+  }
+
+  _clearSlotError(itemId) {
+    const slotCard = this.shadowRoot?.querySelector(`[data-item-id="${itemId}"]`);
+    const errEl = slotCard?.querySelector('[data-slot-error]');
+    if (errEl) {
+      errEl.textContent = '';
+      errEl.style.display = 'none';
+    }
+  }
+
   async _updateItem(itemId, updates) {
     const bridgeState = this._getBridgeState();
-    const isSlotWideUpdate = bridgeState && (updates.time !== undefined || updates.duration !== undefined || updates.weekdays !== undefined || updates.title !== undefined);
+    const isSlotWideUpdate = bridgeState && (
+      updates.time !== undefined ||
+      updates.duration !== undefined ||
+      updates.weekdays !== undefined ||
+      updates.title !== undefined ||
+      updates.enabled !== undefined ||
+      updates.service_start !== undefined ||
+      updates.service_end !== undefined
+    );
     const itemIdsToUpdate = isSlotWideUpdate && bridgeState ? this._getSameSlotItemIds(bridgeState, itemId) : [itemId];
 
-    // Keep slot expanded when time or weekdays change: migrate expanded state from old slotKey to new
+    // When editing time or weekdays: if another slot already exists at that time for these entities, show error and do not save
     if (bridgeState?.attributes?.items && (updates.time !== undefined || updates.weekdays !== undefined)) {
       const currentItem = bridgeState.attributes.items.find(i => i && i.id === itemId);
       if (currentItem) {
-        const oldKey = (currentItem.time || '') + '|' + JSON.stringify(currentItem.weekdays || []);
         const newTime = updates.time !== undefined ? updates.time : currentItem.time;
         const newWeekdays = updates.weekdays !== undefined ? updates.weekdays : currentItem.weekdays;
+        if (this._hasSlotConflictForEdit(bridgeState, itemId, newTime, newWeekdays)) {
+          this._showSlotError(itemId, 'A slot already exists at this time and days for the selected entities.');
+          return;
+        }
+        const oldKey = (currentItem.time || '') + '|' + JSON.stringify(currentItem.weekdays || []);
         const newKey = (newTime || '') + '|' + JSON.stringify(newWeekdays || []);
         if (oldKey !== newKey && this._expandedSlots.has(oldKey)) {
           this._expandedSlots.delete(oldKey);
@@ -2302,6 +2405,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         }
       }
     }
+
+    this._clearSlotError(itemId);
 
     // Optimistically update (using overlay, no hass mutation)
     if (this._hass && this._bridgeSensor && bridgeState?.attributes?.items) {
@@ -2311,20 +2416,45 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         const itemIndex = items.findIndex(item => item && item.id === id);
         if (itemIndex === -1) continue;
         const currentItem = items[itemIndex];
-        const updatedItem = { ...currentItem };
-        if (updates.service_start) {
-          updatedItem.service_start = updates.service_start;
+        const effectiveUpdates = { ...updates };
+        // For slot-wide mode updates, bind service payload entity_id to each item's entity.
+        if (effectiveUpdates.service_start && effectiveUpdates.service_start.value && currentItem?.entity_id) {
+          effectiveUpdates.service_start = {
+            ...effectiveUpdates.service_start,
+            value: {
+              ...effectiveUpdates.service_start.value,
+              entity_id: currentItem.entity_id
+            }
+          };
         }
-        if (updates.service_end !== undefined) {
-          if (updates.service_end === null) {
-            delete updatedItem.service_end;
-          } else {
-            updatedItem.service_end = updates.service_end;
+        if (effectiveUpdates.service_end && effectiveUpdates.service_end.value && currentItem?.entity_id) {
+          effectiveUpdates.service_end = {
+            ...effectiveUpdates.service_end,
+            value: {
+              ...effectiveUpdates.service_end.value,
+              entity_id: currentItem.entity_id
+            }
+          };
+        }
+        const updatedItem = { ...currentItem };
+        if (effectiveUpdates.service_start) {
+          updatedItem.service_start = effectiveUpdates.service_start;
+        }
+        if (effectiveUpdates.clear_duration) {
+          delete updatedItem.duration;
+          delete updatedItem.service_end;
+        } else {
+          if (effectiveUpdates.service_end !== undefined) {
+            if (effectiveUpdates.service_end === null) {
+              delete updatedItem.service_end;
+            } else {
+              updatedItem.service_end = effectiveUpdates.service_end;
+            }
           }
         }
-        Object.keys(updates).forEach(key => {
-          if (key !== 'service_start' && key !== 'service_end') {
-            updatedItem[key] = updates[key];
+        Object.keys(effectiveUpdates).forEach(key => {
+          if (key !== 'service_start' && key !== 'service_end' && key !== 'clear_duration') {
+            updatedItem[key] = effectiveUpdates[key];
           }
         });
         items[itemIndex] = updatedItem;
@@ -2338,9 +2468,11 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
             items: items
           }
         };
-        const firstUpdated = items.find(i => i && itemIdsToUpdate.includes(i.id));
-        if (firstUpdated) {
-          this._updateSlotElement(itemId, firstUpdated);
+        // Update all slot cards in the same slot (multi-entity slots have multiple cards)
+        const firstUpdated = items.find(i => i && i.id === itemId) || items.find(i => i && itemIdsToUpdate.includes(i.id));
+        for (const id of itemIdsToUpdate) {
+          const updated = items.find(i => i && i.id === id);
+          if (updated) this._updateSlotElement(id, updated);
         }
         this._updateHeaderStatus();
         this.hass = { ...this._hass };
@@ -2349,7 +2481,37 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
 
     for (const id of itemIdsToUpdate) {
-      const serviceData = { id, ...updates };
+      const current = bridgeState?.attributes?.items?.find(i => i && i.id === id);
+      const effectiveUpdates = { ...updates };
+      if (effectiveUpdates.service_start && effectiveUpdates.service_start.value && current?.entity_id) {
+        effectiveUpdates.service_start = {
+          ...effectiveUpdates.service_start,
+          value: {
+            ...effectiveUpdates.service_start.value,
+            entity_id: current.entity_id
+          }
+        };
+      }
+      if (effectiveUpdates.service_end && effectiveUpdates.service_end.value && current?.entity_id) {
+        effectiveUpdates.service_end = {
+          ...effectiveUpdates.service_end,
+          value: {
+            ...effectiveUpdates.service_end.value,
+            entity_id: current.entity_id
+          }
+        };
+      }
+      const serviceData = { id, ...effectiveUpdates };
+      if (serviceData.duration !== undefined && serviceData.duration !== null && typeof serviceData.duration !== 'number') {
+        const d = parseInt(serviceData.duration, 10);
+        if (!Number.isNaN(d) && d >= 0) serviceData.duration = d;
+      }
+      // Integration expects service_end to be a dict when present; omit key when null to avoid schema error
+      if (serviceData.service_end === null || serviceData.service_end === undefined) {
+        delete serviceData.service_end;
+      } else if (typeof serviceData.service_end !== 'object' || serviceData.service_end === null || !('name' in serviceData.service_end) || !('value' in serviceData.service_end)) {
+        delete serviceData.service_end;
+      }
       await this._callService('update_item', serviceData);
     }
     
@@ -2359,6 +2521,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           entity_id: this._bridgeSensor
         });
       } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): update_entity after _updateItem failed', e);
       }
       
       setTimeout(() => {
@@ -2372,7 +2535,12 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         if (this._hass) {
           this._optimisticBridgeState = null;
           this.hass = { ...this._hass };
-          this.render().catch(() => {});
+          // Skip full re-render if user is typing in a duration input (would steal focus; focus is inside shadow DOM)
+          const activeEl = this.shadowRoot && this.shadowRoot.activeElement;
+          const isDurationInput = activeEl && activeEl.getAttribute && activeEl.getAttribute('data-action') === 'update-duration';
+          if (!isDurationInput) {
+            this.render().catch(() => {});
+          }
         }
       }, 500);
     }
@@ -2391,6 +2559,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           entity_id: this._bridgeSensor
         });
       } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): update_entity after _deleteSlot failed', e);
       }
       setTimeout(() => {
         if (this._hass) {
@@ -2399,6 +2568,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
               entity_id: this._bridgeSensor
             });
           } catch (e) {
+            if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): update_entity (delayed after _deleteSlot) failed', e);
           }
           setTimeout(() => {
             if (this._hass) {
@@ -2422,6 +2592,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           entity_id: this._bridgeSensor
         });
       } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): update_entity after _deleteItem failed', e);
       }
       setTimeout(() => {
         if (this._hass) {
@@ -2430,6 +2601,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
               entity_id: this._bridgeSensor
             });
           } catch (e) {
+            if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): update_entity (delayed after _deleteItem) failed', e);
           }
           setTimeout(() => {
             if (this._hass) {
@@ -2510,7 +2682,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
     // Load styles and MDI font (for dev/preview only)
     // In production, HA provides ha-icon component with built-in MDI support
-    const styleContent = `/**\n * Climate Scheduler Card - Styles\n * All variables in :host; common/slot/popup/duration use them (overridable via --homie-slots-*).\n */\n\n:host {\n  display: block;\n  padding: 0;\n  overflow: visible;\n  background: transparent;\n  --circular-button-size: var(--mdc-icon-button-size, 40px);\n\n  /* Card (header, slot card) */\n  --_accent: var(--homie-slots-accent, var(--primary-color, #03a9f4));\n  --_bg: var(--homie-slots-bg, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_radius: var(--homie-slots-radius, var(--ha-card-border-radius, 8px));\n  --_shadow: var(--homie-slots-shadow, var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1)));\n  --_text: var(--homie-slots-text, var(--primary-text-color, #212121));\n  --_text-secondary: var(--homie-slots-text-secondary, var(--secondary-text-color, #757575));\n  --_text-on-accent: var(--homie-slots-text-on-accent, var(--text-primary-on-background, #ffffff));\n  --_disabled-color: var(--homie-slots-disabled, var(--disabled-color, var(--disabled-text-color, #9e9e9e)));\n\n  /* Select */\n  --_bg-select: var(--homie-slots-bg-select, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_divider-select: var(--homie-slots-divider-select, var(--divider-color, rgba(0, 0, 0, 0.12)));\n  --_text-select: var(--homie-slots-text-select, var(--primary-text-color, #212121));\n  --_radius-select: var(--homie-slots-radius-select, var(--mdc-shape-small, 4px));\n  --_focus-ring: var(--homie-slots-focus-ring, 0 0 0 2px rgba(3, 169, 244, 0.1));\n\n  /* Input, buttons, slot, weekday, duration */\n  --_padding-input-vertical: var(--homie-slots-padding-input-vertical, var(--mdc-shape-small, 4px));\n  --_padding-input-horizontal: var(--homie-slots-padding-input-horizontal, var(--mdc-shape-small, 8px));\n  --_border-input: var(--homie-slots-border-input, 1px solid var(--_divider));\n  --_radius-input: var(--homie-slots-radius-input, var(--_radius-small));\n  --_divider: var(--homie-slots-divider, var(--divider-color, rgba(0, 0, 0, 0.12)));\n  --_radius-small: var(--homie-slots-radius-small, var(--mdc-shape-small, 4px));\n  --_radius-medium: var(--homie-slots-radius-medium, var(--mdc-shape-medium, 8px));\n  --_secondary-bg: var(--homie-slots-secondary-bg, var(--secondary-background-color, #f5f5f5));\n  --_error-color: var(--homie-slots-error-color, var(--error-color, #f44336));\n\n  /* Button outline */\n  --_button-outline-padding: var(--homie-slots-button-outline-padding, var(--mdc-button-horizontal-padding, 16px));\n  --_button-outline-margin-top: var(--homie-slots-button-outline-margin-top, var(--mdc-layout-grid-gutter, 12px));\n  --_button-outline-radius: var(--homie-slots-button-outline-radius, var(--_radius-medium));\n  --_button-outline-bg: var(--homie-slots-button-outline-bg, transparent);\n  --_button-outline-border: var(--homie-slots-button-outline-border, 2px solid var(--_accent));\n  --_button-outline-color: var(--homie-slots-button-outline-color, var(--_accent));\n  --_button-outline-font-size: var(--homie-slots-button-outline-font-size, var(--mdc-typography-button-font-size, 14px));\n  --_button-outline-font-weight: var(--homie-slots-button-outline-font-weight, var(--mdc-typography-button-font-weight, 900));\n  --_button-outline-letter-spacing: var(--homie-slots-button-outline-letter-spacing, var(--mdc-typography-button-letter-spacing, 0em));\n  --_button-outline-min-height: var(--homie-slots-button-outline-min-height, var(--mdc-button-height, 36px));\n  --_button-outline-hover-shadow: var(--homie-slots-button-outline-hover-shadow, 0 2px 8px rgba(3, 169, 244, 0.3));\n  --_button-outline-active-transform: var(--homie-slots-button-outline-active-transform, scale(0.98));\n  --_button-outline-active-shadow: var(--homie-slots-button-outline-active-shadow, 0 1px 4px rgba(3, 169, 244, 0.2));\n\n  /* Popup */\n  --_popup-bg: var(--homie-slots-popup-background, var(--ha-dialog-background, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)))));\n  --_popup-color: var(--homie-slots-popup-color, var(--primary-text-color, #212121));\n  --_popup-backdrop-filter: var(--homie-slots-popup-backdrop-filter, var(--ha-card-backdrop-filter, none));\n  --_popup-box-shadow: var(--homie-slots-popup-box-shadow, var(--ha-card-box-shadow, none));\n  --_popup-border-radius: var(--homie-slots-popup-border-radius, var(--ha-card-border-radius, 16px));\n  --_popup-width: var(--mdc-dialog-width, 90%);\n  --_popup-max-width: var(--mdc-dialog-max-width, 400px);\n  --_popup-min-width: var(--mdc-dialog-min-width, 0px);\n  --_popup-max-height: var(--mdc-dialog-max-height, 90vh);\n\n  color: var(--_text);\n}\n\n/* === Common / slot / popup / duration (use :host vars above) === */\n.homie-select {\n  background: var(--_bg-select);\n  border: 1px solid var(--_divider-select);\n  border-radius: var(--_radius-select);\n  color: var(--_text-select);\n  font-size: 14px;\n  font-family: inherit;\n  cursor: pointer;\n  appearance: none;\n  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23999999' d='M6 9L1 4h10z'/%3E%3C/svg%3E");\n  background-repeat: no-repeat;\n  background-position: right var(--mdc-shape-small, 6px) center;\n  background-size: 12px;\n  transition: border-color 0.2s, box-shadow 0.2s;\n  padding: var(--_padding-input-vertical) var(--_padding-input-horizontal);\n  padding-right: calc(var(--_padding-input-horizontal) * 2 + 12px);\n}\n@media (prefers-color-scheme: dark) {\n  .homie-select {\n    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 9L1 4h10z'/%3E%3C/svg%3E");\n  }\n}\n.homie-select:focus {\n  outline: none;\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.homie-select option {\n  background: var(--_bg-select);\n  color: var(--_text-select);\n}\n.homie-input {\n  width: 100%;\n  background: var(--_bg);\n  border: var(--_border-input);\n  border-radius: var(--_radius-input);\n  color: var(--_text);\n  font-size: 14px;\n  font-family: inherit;\n  padding: var(--_padding-input-vertical) var(--_padding-input-horizontal);\n  transition: border-color 0.2s, box-shadow 0.2s;\n  box-sizing: border-box;\n}\n.homie-input:focus {\n  outline: none;\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.homie-input::placeholder {\n  color: var(--_text-secondary);\n  opacity: 0.7;\n}\n.button-outline {\n  width: 100%;\n  padding: var(--_button-outline-padding) var(--_button-outline-padding);\n  margin-top: var(--_button-outline-margin-top);\n  border-radius: var(--_button-outline-radius);\n  background: var(--_button-outline-bg);\n  border: var(--_button-outline-border);\n  color: var(--_button-outline-color);\n  font-size: var(--_button-outline-font-size);\n  font-weight: var(--_button-outline-font-weight);\n  letter-spacing: var(--_button-outline-letter-spacing);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n  min-height: var(--_button-outline-min-height);\n}\n.button-outline:hover {\n  background: var(--_accent);\n  color: var(--_text-on-accent);\n  box-shadow: var(--_button-outline-hover-shadow);\n}\n.button-outline:active {\n  transform: var(--_button-outline-active-transform);\n  box-shadow: var(--_button-outline-active-shadow);\n}\n.slot-expandable {\n  max-height: 0;\n  overflow: hidden;\n  transition: max-height 0.3s ease-out;\n}\n.slot-card.expanded .slot-expandable {\n  max-height: 75vh;\n  overflow-y: auto;\n  overflow-x: visible;\n  transition: max-height 0.3s ease-in;\n  padding: var(--ha-card-header-padding, 16px) 0;\n  display: flex;\n  flex-direction: column;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n}\n.slot-details {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 16px);\n  margin-bottom: var(--mdc-layout-grid-gutter, 12px);\n  flex-wrap: wrap;\n}\n.slot-time, .slot-duration {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n}\n.slot-time ha-icon, .slot-duration ha-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n}\n.slot-time .time-picker-separator {\n  color: var(--_text);\n}\n.slot-delete {\n  width: 100%;\n  padding: var(--mdc-shape-small, 10px);\n  margin-top: var(--mdc-layout-grid-gutter, 12px);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  border: 1px solid var(--_divider);\n  color: var(--_error-color);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: var(--mdc-layout-grid-gutter, 8px);\n  transition: all 0.2s;\n  font-size: 14px;\n  font-weight: 500;\n  font-family: inherit;\n  flex-shrink: 0;\n}\n.slot-delete:active { transform: scale(0.98); }\n.slot-delete ha-icon { --mdc-icon-size: 22px; }\n.empty-state {\n  text-align: center;\n  padding: 48px 16px;\n  color: var(--_text-secondary);\n}\n.empty-state ha-icon { --mdc-icon-size: 48px; opacity: 0.3; margin-bottom: 16px; }\n.empty-text { font-size: 14px; line-height: 20px; }\n.popup-overlay {\n  position: fixed;\n  top: 0; left: 0; right: 0; bottom: 0;\n  background: rgba(0, 0, 0, 0.5);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  z-index: 1000;\n  animation: fadeIn 0.2s;\n}\n@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }\n.popup-header {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  padding: var(--ha-card-header-padding, 20px);\n  border-bottom: 1px solid var(--_divider);\n}\n.popup-header ha-icon { --mdc-icon-size: 28px; color: var(--_accent); }\n.popup-title { flex: 1; font-size: 18px; font-weight: 500; color: var(--_text); }\n.popup-close {\n  width: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  height: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  min-width: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  min-height: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  border-radius: 50%;\n  background: transparent;\n  border: none;\n  color: var(--_text-secondary);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n}\n.popup-close ha-icon { --mdc-icon-size: 24px; }\n.popup-body { padding: var(--ha-card-header-padding, 20px); }\n.popup-field { margin-bottom: 20px; }\n.popup-field:last-child { margin-bottom: 0; }\n.popup-field-mode .popup-mode-select,\n#popup-hvac-mode {\n  width: 100%;\n  box-sizing: border-box;\n}\n.popup-hvac-mode-warning {\n  margin-top: 8px;\n  font-size: 12px;\n  color: var(--_error-color);\n  line-height: 1.4;\n}\n.popup-hvac-mode-warning:empty { display: none; }\n/* Entities multi-select: compact trigger + dropdown */\n.popup-entities-wrap {\n  position: relative;\n}\n.popup-entities-trigger {\n  margin-top: 8px;\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  min-height: 40px;\n  padding: 6px 12px;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_bg-select);\n  cursor: pointer;\n  transition: border-color 0.2s, box-shadow 0.2s;\n}\n.popup-entities-trigger:hover,\n.popup-entities-trigger.open {\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.popup-entities-chips {\n  flex: 1;\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n  align-items: center;\n  min-height: 24px;\n}\n.popup-entity-chip {\n  display: inline-flex;\n  align-items: center;\n  padding: 2px 8px;\n  border-radius: var(--_radius-small);\n  background: var(--_secondary-bg);\n  border: 1px solid var(--_divider);\n  font-size: 12px;\n  color: var(--_text);\n  white-space: nowrap;\n}\n.popup-entities-caret {\n  --mdc-icon-size: 20px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n  transition: transform 0.2s;\n}\n.popup-entities-trigger.open .popup-entities-caret {\n  transform: rotate(180deg);\n}\n.popup-entities-dropdown {\n  display: none;\n  position: absolute;\n  left: 0;\n  right: 0;\n  top: 100%;\n  margin-top: 4px;\n  z-index: 10;\n  flex-direction: column;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_popup-bg);\n  box-shadow: var(--_popup-box-shadow);\n  max-height: 220px;\n  overflow: hidden;\n}\n.popup-entities-dropdown.open {\n  display: flex;\n}\n.popup-entity-select-all {\n  border-bottom: 1px solid var(--_divider);\n  flex-shrink: 0;\n}\n.popup-entities-list {\n  overflow-y: auto;\n  overflow-x: hidden;\n  display: flex;\n  flex-direction: column;\n  flex: 1;\n  min-height: 0;\n}\n.popup-entity-row {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  padding: 10px 16px;\n  cursor: pointer;\n  border-bottom: 1px solid var(--_divider);\n  transition: background 0.2s;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.popup-entity-row:last-child {\n  border-bottom: none;\n}\n.popup-entity-row:hover {\n  background: var(--_secondary-bg);\n}\n.popup-entity-row.hidden {\n  display: none;\n}\n.popup-entity-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.popup-entity-row-unsupported .popup-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n/* Shared entities-selector inside popup dropdown */\n.popup-entities-dropdown .entities-selector-list {\n  overflow-y: auto;\n  overflow-x: hidden;\n  display: flex;\n  flex-direction: column;\n  flex: 1;\n  min-height: 0;\n}\n.popup-entities-dropdown .entities-selector-row {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  padding: 10px 16px;\n  cursor: pointer;\n  border-bottom: 1px solid var(--_divider);\n  transition: background 0.2s;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.popup-entities-dropdown .entities-selector-row:last-child {\n  border-bottom: none;\n}\n.popup-entities-dropdown .entities-selector-row:hover {\n  background: var(--_secondary-bg);\n}\n.popup-entities-dropdown .entities-selector-row.hidden {\n  display: none;\n}\n.popup-entities-dropdown .entities-selector-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.popup-entities-dropdown .entities-selector-row-unsupported .entities-selector-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n.popup-entity-row input[type="checkbox"] {\n  width: 18px;\n  height: 18px;\n  margin: 0;\n  cursor: pointer;\n  accent-color: var(--_accent);\n  flex-shrink: 0;\n}\n.popup-entity-row ha-icon {\n  --mdc-icon-size: 22px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n}\n.popup-entity-name {\n  flex: 1;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.popup-entities-list label {\n  cursor: pointer;\n}\n.popup-field label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  margin-bottom: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n}\n.popup-field label ha-icon { --mdc-icon-size: 24px; color: var(--_accent); }\n\n/* HA-style row: label left, control (e.g. ha-switch) right */\n.popup-field-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 8px 0;\n  gap: 16px;\n  cursor: pointer;\n}\n.popup-field-row-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  cursor: pointer;\n  margin: 0;\n  flex: 1;\n}\n.popup-field-row-label ha-icon {\n  --mdc-icon-size: 24px;\n  color: var(--_accent);\n}\n.popup-duration-row ha-switch {\n  flex-shrink: 0;\n}\n.popup-footer {\n  display: flex;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  padding: var(--ha-card-header-padding, 20px);\n  border-top: 1px solid var(--_divider);\n}\n.popup-button {\n  flex: 1;\n  padding: var(--mdc-shape-small, 12px) var(--mdc-shape-medium, 24px);\n  border: none;\n  border-radius: var(--_radius-medium);\n  font-size: 14px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  font-family: inherit;\n}\n.popup-button.cancel { background: var(--_secondary-bg); color: var(--_text); }\n.popup-button.save { background: var(--_accent); color: var(--_text-on-accent); }\n.popup-button:active { transform: scale(0.98); }\n.time-selects { display: flex; align-items: center; gap: 8px; width: 100%; }\n.popup-time-hours, .popup-time-minutes { flex: 1; }\n.time-separator { font-size: 18px; font-weight: 500; color: var(--_text-secondary); user-select: none; }\n.slot-time .time-selects { display: flex; align-items: center; gap: 6px; width: auto; }\n.slot-time .time-separator { font-size: 14px; color: var(--_text); }\n.weekday-mode-selector { display: flex; gap: 8px; margin-bottom: 12px; }\n.weekday-mode-btn {\n  flex: 1;\n  padding: var(--mdc-shape-small, 10px);\n  border: 2px solid var(--_divider);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  color: var(--_text-secondary);\n  text-align: center;\n  font-size: 13px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n  font-family: inherit;\n}\n.weekday-mode-btn.active, .weekday-mode-btn:hover {\n  background: var(--_accent);\n  border-color: var(--_accent);\n  color: var(--_text-on-accent);\n}\n.weekday-mode-btn:hover { opacity: 0.8; }\n.popup-weekdays { display: flex; gap: 8px; flex-wrap: wrap; }\n.popup-weekdays.hidden { display: none; }\n.popup-weekday {\n  flex: 1;\n  min-width: 40px;\n  padding: var(--mdc-shape-small, 10px);\n  border: 2px solid var(--_divider);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  color: var(--_text-secondary);\n  text-align: center;\n  font-size: 13px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n}\n.popup-weekday.active {\n  background: var(--_accent);\n  border-color: var(--_accent);\n  color: var(--_text-on-accent);\n}\n@media (max-width: 480px) {\n  .popup-weekday { min-width: 35px; padding: 8px; font-size: 12px; }\n}\n.duration-selector-wrapper {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  width: 100%;\n}\n.duration-slider {\n  flex: 1;\n  height: 4px;\n  border-radius: 2px;\n  background: var(--_divider);\n  outline: none;\n  -webkit-appearance: none;\n  appearance: none;\n}\n.duration-slider::-webkit-slider-thumb {\n  -webkit-appearance: none;\n  appearance: none;\n  width: 20px;\n  height: 20px;\n  border-radius: 50%;\n  background: var(--_accent);\n  cursor: pointer;\n  border: 2px solid var(--_bg);\n  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);\n  transition: all 0.2s;\n}\n.duration-slider::-webkit-slider-thumb:hover {\n  transform: scale(1.1);\n  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);\n}\n.duration-slider::-moz-range-thumb {\n  width: 20px;\n  height: 20px;\n  border-radius: 50%;\n  background: var(--_accent);\n  cursor: pointer;\n  border: 2px solid var(--_bg);\n  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);\n  transition: all 0.2s;\n}\n.duration-slider::-moz-range-thumb:hover {\n  transform: scale(1.1);\n  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);\n}\n.duration-input {\n  width: 80px;\n  min-width: 80px;\n  text-align: center;\n}\n\n/* ========================================\n   MAIN HEADER\n   ======================================== */\n\n.main-header {\n  display: flex;\n  justify-content: space-between;\n  align-items: center;\n  padding: var(--ha-card-header-padding, 16px);\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  border-radius: var(--ha-card-border-radius, var(--mdc-shape-medium, 8px));\n  box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));\n  backdrop-filter: var(--ha-card-backdrop-filter, blur(10px));\n}\n\n.main-header:not(:last-child) {\n  margin-bottom: var(--mdc-layout-grid-gutter, 12px);\n}\n\n.header-left {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  flex: 1;\n}\n\n.header-icon {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--primary-color, #03a9f4);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  color: var(--text-primary-on-background, #ffffff);\n  cursor: pointer;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.header-icon:active {\n  transform: scale(0.95);\n}\n\n.header-icon.disabled {\n  opacity: 0.5;\n  background: var(--disabled-color, var(--disabled-text-color));\n}\n\n.header-icon.enabled {\n  background: var(--primary-color, #03a9f4);\n  opacity: 1;\n}\n\n.header-icon ha-icon {\n  --mdc-icon-size: 28px;\n}\n\n.header-text {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n\n.header-title {\n  font-size: 18px;\n  font-weight: 500;\n  color: var(--primary-text-color, #212121);\n  line-height: 24px;\n}\n\n.header-title--hidden {\n  display: none;\n}\n\n.header-status {\n  font-size: 14px;\n  color: var(--secondary-text-color, #757575);\n  line-height: 20px;\n}\n\n.add-button {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--primary-color, #03a9f4);\n  border: none;\n  color: var(--text-primary-on-background, #ffffff);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.add-button:active {\n  transform: scale(0.95);\n}\n\n.add-button ha-icon {\n  --mdc-icon-size: 28px;\n}\n\n/* ========================================\n   ADD SLOT BUTTON\n   ======================================== */\n\n/* Button outline style moved to shared/assets/homie-css.css */\n\n/* ========================================\n   SLOTS CONTAINER\n   ======================================== */\n\n.slots-container {\n  display: flex;\n  flex-direction: column;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n}\n\n.slots-container--empty {\n  display: none;\n}\n\n/* ========================================\n   SLOT CARD (Blue Card Design)\n   ======================================== */\n\n.slot-card {\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  border-radius: var(--ha-card-border-radius, var(--mdc-shape-medium, 8px));\n  padding: var(--ha-card-header-padding, 16px) var(--ha-card-header-padding, 16px) 0 var(--ha-card-header-padding, 16px);\n  color: var(--primary-text-color, #212121);\n  position: relative;\n  box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));\n  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;\n  backdrop-filter: var(--ha-card-backdrop-filter, blur(10px));\n}\n\n/* Active slot (enabled) - same background as header */\n.slot-card:not(.disabled) {\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n}\n\n.slot-card.disabled {\n  opacity: 0.6;\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.5)));\n}\n\n.slot-header {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  margin-bottom: 0;\n}\n\n.slot-icon {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--primary-color, #03a9f4);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  cursor: pointer;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n  color: var(--text-primary-on-background, #ffffff);\n}\n\n.slot-icon:active {\n  transform: scale(0.95);\n}\n\n.slot-icon.enabled {\n  background: var(--primary-color, #03a9f4);\n  opacity: 1;\n}\n\n.slot-icon.disabled {\n  background: var(--disabled-color, var(--disabled-text-color, #9e9e9e));\n  opacity: 0.6;\n}\n\n.slot-icon ha-icon {\n  --mdc-icon-size: 24px;\n}\n\n.slot-info {\n  flex: 1;\n}\n\n.slot-name {\n  font-size: 16px;\n  font-weight: 500;\n  margin-bottom: 4px;\n}\n\n.slot-status {\n  font-size: 14px;\n  color: var(--secondary-text-color, #757575);\n}\n\n.slot-expand {\n  width: 100%;\n  padding: 8px 0;\n  margin-top: var(--mdc-layout-grid-gutter, 12px);\n  border-radius: 0;\n  background: transparent;\n  border: none;\n  border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));\n  color: var(--primary-text-color, #212121);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.slot-expand ha-icon {\n  --mdc-icon-size: 20px;\n  transition: transform 0.2s;\n}\n\n.slot-card.expanded .slot-expand ha-icon {\n  transform: rotate(180deg);\n}\n\n/* Slot expandable, slot-details styles moved to shared/assets/homie-css.css */\n\n.slot-title {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n  width: 100%;\n  flex-basis: 100%;\n  margin-bottom: var(--mdc-layout-grid-gutter, 8px);\n}\n.slot-title ha-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n}\n.slot-title .slot-title-input {\n  flex: 1;\n  min-width: 0;\n  box-sizing: border-box;\n}\n\n.slot-time,\n.slot-duration,\n.slot-hvac-mode {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n}\n\n.slot-time ha-icon,\n.slot-duration ha-icon,\n.slot-hvac-mode ha-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n}\n\n.slot-entities-wrap {\n  margin-top: 12px;\n  padding-top: 12px;\n  border-top: 1px solid var(--_divider);\n  position: relative;\n}\n.slot-entities-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  margin-bottom: 8px;\n}\n.slot-entities-label ha-icon {\n  --mdc-icon-size: 22px;\n  color: var(--_accent);\n}\n/* Slot entities dropdown (same UX as popup) */\n.slot-entities-trigger {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  min-height: 40px;\n  padding: 6px 12px;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_bg-select);\n  cursor: pointer;\n  transition: border-color 0.2s, box-shadow 0.2s;\n}\n.slot-entities-trigger:hover,\n.slot-entities-trigger.open {\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.slot-entities-chips {\n  flex: 1;\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n  align-items: center;\n  min-height: 24px;\n}\n.slot-entities-chips .popup-entity-chip {\n  display: inline-flex;\n  align-items: center;\n  padding: 2px 8px;\n  border-radius: var(--_radius-small);\n  background: var(--_secondary-bg);\n  border: 1px solid var(--_divider);\n  font-size: 12px;\n  color: var(--_text);\n  white-space: nowrap;\n}\n.slot-entities-caret {\n  --mdc-icon-size: 20px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n  transition: transform 0.2s;\n}\n.slot-entities-trigger.open .slot-entities-caret {\n  transform: rotate(180deg);\n}\n.slot-entities-dropdown {\n  display: none;\n  position: absolute;\n  left: 0;\n  right: 0;\n  top: 100%;\n  margin-top: 4px;\n  z-index: 10;\n  flex-direction: column;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_popup-bg);\n  box-shadow: var(--_popup-box-shadow);\n  max-height: 220px;\n  overflow: hidden;\n}\n.slot-entities-wrap .slot-entities-dropdown.open {\n  display: flex;\n}\n.slot-entity-select-all {\n  border-bottom: 1px solid var(--_divider);\n  flex-shrink: 0;\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  padding: 10px 16px;\n  cursor: pointer;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.slot-entity-select-all input {\n  width: 18px;\n  height: 18px;\n  margin: 0;\n  accent-color: var(--_accent);\n  flex-shrink: 0;\n}\n.slot-entities-list {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n.slot-entity-row {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  padding: 8px 0;\n  cursor: pointer;\n  font-size: 14px;\n}\n.slot-entity-row input[type="checkbox"] {\n  width: 18px;\n  height: 18px;\n  margin: 0;\n  accent-color: var(--_accent);\n  flex-shrink: 0;\n}\n.slot-entity-row ha-icon {\n  --mdc-icon-size: 20px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n}\n.slot-entity-name {\n  flex: 1;\n  color: var(--_text);\n}\n/* Shared entities-selector inside slot */\n.slot-entities-wrap .entities-selector-list {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n.slot-entities-wrap .entities-selector-row {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  padding: 8px 0;\n  cursor: pointer;\n  font-size: 14px;\n}\n.slot-entities-wrap .entities-selector-row input[type="checkbox"] {\n  width: 18px;\n  height: 18px;\n  margin: 0;\n  accent-color: var(--_accent);\n  flex-shrink: 0;\n}\n.slot-entities-wrap .entities-selector-row ha-icon {\n  --mdc-icon-size: 20px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n}\n.slot-entities-wrap .entities-selector-entity-name {\n  flex: 1;\n  color: var(--_text);\n}\n.slot-entities-wrap .slot-entities-dropdown .entities-selector-list {\n  overflow-y: auto;\n  overflow-x: hidden;\n  flex: 1;\n  min-height: 0;\n}\n.slot-entities-wrap .slot-entities-dropdown .entities-selector-row {\n  padding: 10px 16px;\n  border-bottom: 1px solid var(--_divider);\n  gap: 12px;\n}\n.slot-entities-wrap .slot-entities-dropdown .entities-selector-row:last-child {\n  border-bottom: none;\n}\n.slot-entities-wrap .slot-entities-dropdown .entities-selector-row:hover {\n  background: var(--_secondary-bg);\n}\n.slot-entities-wrap .entities-selector-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.slot-entities-wrap .entities-selector-row-unsupported .entities-selector-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n.slot-hvac-mode select {\n  flex: 1;\n  min-width: 0;\n  box-sizing: border-box;\n}\n\n/* Time picker styles are now in shared/homie-select/homie-select.css */\n\n.slot-time .time-picker-separator {\n  color: var(--primary-text-color, #212121);\n}\n\n/* Select styles are now in shared/homie-select.css */\n\n.slot-weekdays-wrapper {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n}\n\n.slot-weekdays-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n  flex-shrink: 0;\n}\n\n.slot-weekdays {\n  display: flex;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  flex-wrap: wrap;\n  flex: 1;\n  justify-content: flex-start;\n}\n\n.slot-weekday {\n  padding: var(--mdc-shape-small, 6px) var(--mdc-shape-small, 8px);\n  border-radius: var(--ha-card-border-radius, var(--mdc-shape-small, 4px));\n  background: var(--secondary-background-color, #f5f5f5);\n  border: 2px solid var(--divider-color, rgba(0, 0, 0, 0.12));\n  color: var(--primary-text-color, #212121);\n  font-size: 12px;\n  font-weight: 400;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n  flex-shrink: 0;\n  min-width: fit-content;\n  flex: 1;\n  text-align: center;\n  min-width: 0;\n}\n\n.slot-weekday.active {\n  background: var(--primary-color, #03a9f4);\n  color: var(--text-primary-on-background, #ffffff);\n  font-weight: 600;\n  border-color: var(--primary-color, #03a9f4);\n}\n\n/* Slot delete, empty state styles moved to shared/assets/homie-css.css */\n\n/* Popup overlay, popup-header, popup-body, popup-field styles moved to shared/assets/homie-css.css */\n\n/* Popup content (defaults, override via --homie-slots-popup-*) */\n.popup-content {\n  background: var(--_popup-bg);\n  color: var(--_popup-color);\n  -webkit-backdrop-filter: var(--_popup-backdrop-filter);\n  backdrop-filter: var(--_popup-backdrop-filter);\n  box-shadow: var(--_popup-box-shadow);\n  border-radius: var(--_popup-border-radius);\n  width: var(--_popup-width);\n  max-width: var(--_popup-max-width);\n  min-width: var(--_popup-min-width);\n  max-height: var(--_popup-max-height);\n  overflow-y: auto;\n  animation: slideUp 0.3s;\n}\n\n@keyframes slideUp {\n  from {\n    transform: translateY(20px);\n    opacity: 0;\n  }\n  to {\n    transform: translateY(0);\n    opacity: 1;\n  }\n}\n\n/* Popup select styles are now in shared/homie-select.css */\n\n/* Slot time selects */\n.slot-time .time-selects {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n  width: auto;\n}\n\n/* Slot time select styles are now in shared/homie-select.css */\n\n.slot-time .time-separator {\n  font-size: 14px;\n  color: var(--primary-text-color, #212121);\n}\n\n/* Time selects, weekday selector, popup footer/button styles moved to shared/assets/homie-css.css */\n\n/* ========================================\n   RESPONSIVE\n   ======================================== */\n\n@media (max-width: 480px) {\n  .main-header {\n    padding: var(--mdc-shape-small, 12px);\n  }\n  \n  .header-title {\n    font-size: 16px;\n  }\n  \n  .slot-card {\n    padding: var(--mdc-shape-small, 12px);\n  }\n  \n  :host {\n    --_popup-width: var(--mdc-dialog-width, 95%);\n    --_popup-max-height: var(--mdc-dialog-max-height, 85vh);\n  }\n}\n\n/* ========================================\n   DARK THEME SUPPORT\n   ======================================== */\n\n/* Dark theme adjustments are handled by HA CSS variables */\n/* No additional dark theme styles needed */\n`;
+    const styleContent = `/**\n * Shared styles for slot-form-fields.html (Add Slot popup + Edit Slot).\n * Uses :host CSS variables from the card (--_accent, --_text, etc.).\n */\n\n.popup-field { margin-bottom: 20px; }\n.popup-field:last-child { margin-bottom: 0; }\n\n/* Shared form (add popup + edit slot) - one structure, same styles */\n.slot-form .slot-form-field { margin-bottom: 20px; }\n.slot-form .slot-form-field:last-child { margin-bottom: 0; }\n.slot-form .slot-form-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  margin-bottom: 8px;\n}\n.slot-form .slot-form-label ha-icon { --mdc-icon-size: 22px; color: var(--_accent); }\n\n/* Mode, Fan, Temp in one row */\n.slot-form-row {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 12px 16px;\n  align-items: flex-end;\n  margin-bottom: 20px;\n}\n.slot-form-row .slot-form-field {\n  flex: 1;\n  min-width: 0;\n  margin-bottom: 0;\n}\n.slot-form-row-mode-fan-temp .slot-form-field-mode,\n.slot-form-row-mode-fan-temp .slot-form-field-fan,\n.slot-form-row-mode-fan-temp .slot-form-field-temp {\n  flex: 1 1 0;\n  min-width: 0;\n}\n/* stretch selects and inputs to full column width */\n.slot-form-row-mode-fan-temp .slot-form-field select,\n.slot-form-row-mode-fan-temp .slot-form-field input[type="number"] {\n  width: 100%;\n  box-sizing: border-box;\n  display: block;\n}\n\n.slot-form-field-mode .slot-form-mode-select { width: 100%; box-sizing: border-box; }\n.slot-form-mode-warning {\n  margin-top: 8px;\n  font-size: 12px;\n  color: var(--_error-color);\n  line-height: 1.4;\n}\n.slot-form-mode-warning:empty { display: none; }\n\n.slot-form-entities-wrap { position: relative; }\n.slot-form-entities-trigger {\n  margin-top: 8px;\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  min-height: 40px;\n  padding: 6px 12px;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_bg-select);\n  cursor: pointer;\n  transition: border-color 0.2s, box-shadow 0.2s;\n}\n.slot-form-entities-trigger:hover,\n.slot-form-entities-trigger.open {\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.slot-form-entities-chips {\n  flex: 1;\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n  align-items: center;\n  min-height: 24px;\n}\n.popup-entity-chip {\n  display: inline-flex;\n  align-items: center;\n  padding: 2px 8px;\n  border-radius: var(--_radius-small);\n  background: var(--_secondary-bg);\n  border: 1px solid var(--_divider);\n  font-size: 12px;\n  color: var(--_text);\n  white-space: nowrap;\n}\n.slot-form-entities-caret {\n  --mdc-icon-size: 20px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n  transition: transform 0.2s;\n}\n.slot-form-entities-trigger.open .slot-form-entities-caret {\n  transform: rotate(180deg);\n}\n.slot-form-entities-dropdown {\n  display: none;\n  position: absolute;\n  left: 0;\n  right: 0;\n  top: 100%;\n  margin-top: 4px;\n  z-index: 10;\n  flex-direction: column;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_popup-bg);\n  box-shadow: var(--_popup-box-shadow);\n  max-height: 220px;\n  overflow: hidden;\n}\n.slot-form-entities-dropdown.open {\n  display: flex;\n}\n.slot-form-entities-select-all-row {\n  border-bottom: 1px solid var(--_divider);\n  flex-shrink: 0;\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  padding: 10px 16px;\n  cursor: pointer;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.slot-form-entity-row:hover {\n  background: var(--_secondary-bg);\n}\n.entities-selector-row.entities-selector-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.entities-selector-row.entities-selector-row-unsupported .entities-selector-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n.slot-form-entities-dropdown .entities-selector-list {\n  overflow-y: auto;\n  overflow-x: hidden;\n  display: flex;\n  flex-direction: column;\n  flex: 1;\n  min-height: 0;\n}\n.slot-form-entities-dropdown .entities-selector-row {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  padding: 10px 16px;\n  cursor: pointer;\n  border-bottom: 1px solid var(--_divider);\n  transition: background 0.2s;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.popup-entities-dropdown .entities-selector-row:last-child {\n  border-bottom: none;\n}\n.popup-entities-dropdown .entities-selector-row:hover {\n  background: var(--_secondary-bg);\n}\n.popup-entities-dropdown .entities-selector-row.hidden {\n  display: none;\n}\n.popup-entities-dropdown .entities-selector-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.popup-entities-dropdown .entities-selector-row-unsupported .entities-selector-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n.popup-entity-row input[type="checkbox"] {\n  width: 18px;\n  height: 18px;\n  margin: 0;\n  cursor: pointer;\n  accent-color: var(--_accent);\n  flex-shrink: 0;\n}\n.popup-entity-row ha-icon {\n  --mdc-icon-size: 22px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n}\n.popup-entity-name {\n  flex: 1;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.popup-entities-list label {\n  cursor: pointer;\n}\n.popup-field label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  margin-bottom: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n}\n.popup-field label ha-icon { --mdc-icon-size: 24px; color: var(--_accent); }\n\n/* HA-style row: label left, control (e.g. ha-switch) right */\n.popup-field-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 8px 0;\n  gap: 16px;\n  cursor: pointer;\n}\n.popup-field-row-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  cursor: pointer;\n  margin: 0;\n  flex: 1;\n}\n.popup-field-row-label ha-icon {\n  --mdc-icon-size: 24px;\n  color: var(--_accent);\n}\n.popup-duration-row ha-switch,\n.slot-form-duration-enabled {\n  flex-shrink: 0;\n}\n.slot-form-duration-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 8px 0;\n  gap: 16px;\n  cursor: pointer;\n}\n.slot-form-field-row-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  cursor: pointer;\n  margin: 0;\n  flex: 1;\n}\n.slot-form-field-row-label ha-icon {\n  --mdc-icon-size: 24px;\n  color: var(--_accent);\n}\n/* Slot edit: same vertical layout as add (label on new line, then control) */\n.slot-expandable .slot-form .slot-form-field {\n  display: block;\n  font-size: 14px;\n}\n.slot-expandable .slot-form-title-input {\n  width: 100%;\n  box-sizing: border-box;\n}\n\n/**\n * Climate Scheduler Card - Styles\n * All variables in :host; common/slot/popup/duration use them (overridable via --homie-slots-*).\n */\n\n:host {\n  display: block;\n  padding: 0;\n  overflow: visible;\n  background: transparent;\n  --circular-button-size: var(--mdc-icon-button-size, 40px);\n\n  /* Card (header, slot card) */\n  --_accent: var(--homie-slots-accent, var(--primary-color, #03a9f4));\n  --_bg: var(--homie-slots-bg, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_radius: var(--homie-slots-radius, var(--ha-card-border-radius, 8px));\n  --_shadow: var(--homie-slots-shadow, var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1)));\n  --_text: var(--homie-slots-text, var(--primary-text-color, #212121));\n  --_text-secondary: var(--homie-slots-text-secondary, var(--secondary-text-color, #757575));\n  --_text-on-accent: var(--homie-slots-text-on-accent, var(--text-primary-on-background, #ffffff));\n  --_disabled-color: var(--homie-slots-disabled, var(--disabled-color, var(--disabled-text-color, #9e9e9e)));\n\n  /* Select */\n  --_bg-select: var(--homie-slots-bg-select, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_divider-select: var(--homie-slots-divider-select, var(--divider-color, rgba(0, 0, 0, 0.12)));\n  --_text-select: var(--homie-slots-text-select, var(--primary-text-color, #212121));\n  --_radius-select: var(--homie-slots-radius-select, var(--mdc-shape-small, 4px));\n  --_focus-ring: var(--homie-slots-focus-ring, 0 0 0 2px rgba(3, 169, 244, 0.1));\n\n  /* Input, buttons, slot, weekday, duration */\n  --_padding-input-vertical: var(--homie-slots-padding-input-vertical, var(--mdc-shape-small, 4px));\n  --_padding-input-horizontal: var(--homie-slots-padding-input-horizontal, var(--mdc-shape-small, 8px));\n  --_border-input: var(--homie-slots-border-input, 1px solid var(--_divider));\n  --_radius-input: var(--homie-slots-radius-input, var(--_radius-small));\n  --_divider: var(--homie-slots-divider, var(--divider-color, rgba(0, 0, 0, 0.12)));\n  --_radius-small: var(--homie-slots-radius-small, var(--mdc-shape-small, 4px));\n  --_radius-medium: var(--homie-slots-radius-medium, var(--mdc-shape-medium, 8px));\n  --_secondary-bg: var(--homie-slots-secondary-bg, var(--secondary-background-color, #f5f5f5));\n  --_error-color: var(--homie-slots-error-color, var(--error-color, #f44336));\n\n  /* Button outline */\n  --_button-outline-padding: var(--homie-slots-button-outline-padding, var(--mdc-button-horizontal-padding, 16px));\n  --_button-outline-margin-top: var(--homie-slots-button-outline-margin-top, var(--mdc-layout-grid-gutter, 12px));\n  --_button-outline-radius: var(--homie-slots-button-outline-radius, var(--_radius-medium));\n  --_button-outline-bg: var(--homie-slots-button-outline-bg, transparent);\n  --_button-outline-border: var(--homie-slots-button-outline-border, 2px solid var(--_accent));\n  --_button-outline-color: var(--homie-slots-button-outline-color, var(--_accent));\n  --_button-outline-font-size: var(--homie-slots-button-outline-font-size, var(--mdc-typography-button-font-size, 14px));\n  --_button-outline-font-weight: var(--homie-slots-button-outline-font-weight, var(--mdc-typography-button-font-weight, 900));\n  --_button-outline-letter-spacing: var(--homie-slots-button-outline-letter-spacing, var(--mdc-typography-button-letter-spacing, 0em));\n  --_button-outline-min-height: var(--homie-slots-button-outline-min-height, var(--mdc-button-height, 36px));\n  --_button-outline-hover-shadow: var(--homie-slots-button-outline-hover-shadow, 0 2px 8px rgba(3, 169, 244, 0.3));\n  --_button-outline-active-transform: var(--homie-slots-button-outline-active-transform, scale(0.98));\n  --_button-outline-active-shadow: var(--homie-slots-button-outline-active-shadow, 0 1px 4px rgba(3, 169, 244, 0.2));\n\n  /* Popup */\n  --_popup-bg: var(--homie-slots-popup-background, var(--ha-dialog-background, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)))));\n  --_popup-color: var(--homie-slots-popup-color, var(--primary-text-color, #212121));\n  --_popup-backdrop-filter: var(--homie-slots-popup-backdrop-filter, var(--ha-card-backdrop-filter, none));\n  --_popup-box-shadow: var(--homie-slots-popup-box-shadow, var(--ha-card-box-shadow, none));\n  --_popup-border-radius: var(--homie-slots-popup-border-radius, var(--ha-card-border-radius, 16px));\n  --_popup-width: var(--mdc-dialog-width, 90%);\n  --_popup-max-width: var(--mdc-dialog-max-width, 400px);\n  --_popup-min-width: var(--mdc-dialog-min-width, 0px);\n  --_popup-max-height: var(--mdc-dialog-max-height, 90vh);\n\n  color: var(--_text);\n}\n\n/* === Common / slot / popup / duration (use :host vars above) === */\n.homie-select {\n  background: var(--_bg-select);\n  border: 1px solid var(--_divider-select);\n  border-radius: var(--_radius-select);\n  color: var(--_text-select);\n  font-size: 14px;\n  font-family: inherit;\n  cursor: pointer;\n  appearance: none;\n  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23999999' d='M6 9L1 4h10z'/%3E%3C/svg%3E");\n  background-repeat: no-repeat;\n  background-position: right var(--mdc-shape-small, 6px) center;\n  background-size: 12px;\n  transition: border-color 0.2s, box-shadow 0.2s;\n  padding: var(--_padding-input-vertical) var(--_padding-input-horizontal);\n  padding-right: calc(var(--_padding-input-horizontal) * 2 + 12px);\n}\n@media (prefers-color-scheme: dark) {\n  .homie-select {\n    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 9L1 4h10z'/%3E%3C/svg%3E");\n  }\n}\n.homie-select:focus {\n  outline: none;\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.homie-select option {\n  background: var(--_bg-select);\n  color: var(--_text-select);\n}\n.homie-input {\n  width: 100%;\n  background: var(--_bg);\n  border: var(--_border-input);\n  border-radius: var(--_radius-input);\n  color: var(--_text);\n  font-size: 14px;\n  font-family: inherit;\n  padding: var(--_padding-input-vertical) var(--_padding-input-horizontal);\n  transition: border-color 0.2s, box-shadow 0.2s;\n  box-sizing: border-box;\n}\n.homie-input:focus {\n  outline: none;\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.homie-input::placeholder {\n  color: var(--_text-secondary);\n  opacity: 0.7;\n}\n.button-outline {\n  width: 100%;\n  padding: var(--_button-outline-padding) var(--_button-outline-padding);\n  margin-top: var(--_button-outline-margin-top);\n  border-radius: var(--_button-outline-radius);\n  background: var(--_button-outline-bg);\n  border: var(--_button-outline-border);\n  color: var(--_button-outline-color);\n  font-size: var(--_button-outline-font-size);\n  font-weight: var(--_button-outline-font-weight);\n  letter-spacing: var(--_button-outline-letter-spacing);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n  min-height: var(--_button-outline-min-height);\n}\n.button-outline:hover {\n  background: var(--_accent);\n  color: var(--_text-on-accent);\n  box-shadow: var(--_button-outline-hover-shadow);\n}\n.button-outline:active {\n  transform: var(--_button-outline-active-transform);\n  box-shadow: var(--_button-outline-active-shadow);\n}\n.slot-expandable {\n  max-height: 0;\n  overflow: hidden;\n  transition: max-height 0.3s ease-out;\n}\n.slot-card.expanded .slot-expandable {\n  max-height: 75vh;\n  overflow-y: auto;\n  overflow-x: visible;\n  transition: max-height 0.3s ease-in;\n  padding: var(--ha-card-header-padding, 16px) 0;\n  display: flex;\n  flex-direction: column;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n}\n.slot-details {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 16px);\n  margin-bottom: var(--mdc-layout-grid-gutter, 12px);\n  flex-wrap: wrap;\n}\n.slot-time, .slot-duration {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n}\n.slot-time ha-icon, .slot-duration ha-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n}\n.slot-time .time-picker-separator {\n  color: var(--_text);\n}\n.slot-delete {\n  width: 100%;\n  padding: var(--mdc-shape-small, 10px);\n  margin-top: var(--mdc-layout-grid-gutter, 12px);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  border: 1px solid var(--_divider);\n  color: var(--_error-color);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: var(--mdc-layout-grid-gutter, 8px);\n  transition: all 0.2s;\n  font-size: 14px;\n  font-weight: 500;\n  font-family: inherit;\n  flex-shrink: 0;\n}\n.slot-delete:active { transform: scale(0.98); }\n.slot-delete ha-icon { --mdc-icon-size: 22px; }\n.empty-state {\n  text-align: center;\n  padding: 48px 16px;\n  color: var(--_text-secondary);\n}\n.empty-state ha-icon { --mdc-icon-size: 48px; opacity: 0.3; margin-bottom: 16px; }\n.empty-text { font-size: 14px; line-height: 20px; }\n.popup-overlay {\n  position: fixed;\n  top: 0; left: 0; right: 0; bottom: 0;\n  background: rgba(0, 0, 0, 0.5);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  z-index: 1000;\n  animation: fadeIn 0.2s;\n}\n@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }\n.popup-header {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  padding: var(--ha-card-header-padding, 20px);\n  border-bottom: 1px solid var(--_divider);\n}\n.popup-header ha-icon { --mdc-icon-size: 28px; color: var(--_accent); }\n.popup-title { flex: 1; font-size: 18px; font-weight: 500; color: var(--_text); }\n.popup-close {\n  width: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  height: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  min-width: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  min-height: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  border-radius: 50%;\n  background: transparent;\n  border: none;\n  color: var(--_text-secondary);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n}\n.popup-close ha-icon { --mdc-icon-size: 24px; }\n.popup-body { padding: var(--ha-card-header-padding, 20px); }\n.popup-error {\n  color: var(--error-color, #b00020);\n  font-size: 13px;\n  margin-bottom: 12px;\n  display: block;\n}\n.slot-error-message {\n  color: var(--error-color, #b00020);\n  font-size: 13px;\n  margin-bottom: 8px;\n}\n/* Shared form styles moved to shared/climate/slot-form-fields/slot-form-fields.css (inlined at build time) */\n\n.popup-footer {\n  display: flex;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  padding: var(--ha-card-header-padding, 20px);\n  border-top: 1px solid var(--_divider);\n}\n.popup-button {\n  flex: 1;\n  padding: var(--mdc-shape-small, 12px) var(--mdc-shape-medium, 24px);\n  border: none;\n  border-radius: var(--_radius-medium);\n  font-size: 14px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  font-family: inherit;\n}\n.popup-button.cancel { background: var(--_secondary-bg); color: var(--_text); }\n.popup-button.save { background: var(--_accent); color: var(--_text-on-accent); }\n.popup-button:active { transform: scale(0.98); }\n.time-selects { display: flex; align-items: center; gap: 8px; width: 100%; }\n.popup-time-hours, .popup-time-minutes { flex: 1; }\n.time-separator { font-size: 18px; font-weight: 500; color: var(--_text-secondary); user-select: none; }\n.slot-time .time-selects { display: flex; align-items: center; gap: 6px; width: auto; }\n.slot-time .time-separator { font-size: 14px; color: var(--_text); }\n.weekday-mode-selector { display: flex; gap: 8px; margin-bottom: 12px; }\n.weekday-mode-btn {\n  flex: 1;\n  padding: var(--mdc-shape-small, 10px);\n  border: 2px solid var(--_divider);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  color: var(--_text-secondary);\n  text-align: center;\n  font-size: 13px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n  font-family: inherit;\n}\n.weekday-mode-btn.active, .weekday-mode-btn:hover {\n  background: var(--_accent);\n  border-color: var(--_accent);\n  color: var(--_text-on-accent);\n}\n.weekday-mode-btn:hover { opacity: 0.8; }\n.popup-weekdays { display: flex; gap: 8px; flex-wrap: wrap; }\n.popup-weekdays.hidden { display: none; }\n.popup-weekday {\n  flex: 1;\n  min-width: 40px;\n  padding: var(--mdc-shape-small, 10px);\n  border: 2px solid var(--_divider);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  color: var(--_text-secondary);\n  text-align: center;\n  font-size: 13px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n}\n.popup-weekday.active {\n  background: var(--_accent);\n  border-color: var(--_accent);\n  color: var(--_text-on-accent);\n}\n@media (max-width: 480px) {\n  .popup-weekday { min-width: 35px; padding: 8px; font-size: 12px; }\n}\n.duration-selector-wrapper {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  width: 100%;\n}\n.duration-slider {\n  flex: 1;\n  height: 4px;\n  border-radius: 2px;\n  background: var(--_divider);\n  outline: none;\n  -webkit-appearance: none;\n  appearance: none;\n}\n.duration-slider::-webkit-slider-thumb {\n  -webkit-appearance: none;\n  appearance: none;\n  width: 20px;\n  height: 20px;\n  border-radius: 50%;\n  background: var(--_accent);\n  cursor: pointer;\n  border: 2px solid var(--_bg);\n  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);\n  transition: all 0.2s;\n}\n.duration-slider::-webkit-slider-thumb:hover {\n  transform: scale(1.1);\n  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);\n}\n.duration-slider::-moz-range-thumb {\n  width: 20px;\n  height: 20px;\n  border-radius: 50%;\n  background: var(--_accent);\n  cursor: pointer;\n  border: 2px solid var(--_bg);\n  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);\n  transition: all 0.2s;\n}\n.duration-slider::-moz-range-thumb:hover {\n  transform: scale(1.1);\n  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);\n}\n.duration-input {\n  width: 80px;\n  min-width: 80px;\n  text-align: center;\n}\n\n/* ========================================\n   MAIN HEADER\n   ======================================== */\n\n.main-header {\n  display: flex;\n  justify-content: space-between;\n  align-items: center;\n  padding: var(--ha-card-header-padding, 16px);\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  border-radius: var(--ha-card-border-radius, var(--mdc-shape-medium, 8px));\n  box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));\n  backdrop-filter: var(--ha-card-backdrop-filter, blur(10px));\n}\n\n.main-header:not(:last-child) {\n  margin-bottom: var(--mdc-layout-grid-gutter, 12px);\n}\n\n.header-left {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  flex: 1;\n}\n\n.header-icon {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--primary-color, #03a9f4);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  color: var(--text-primary-on-background, #ffffff);\n  cursor: pointer;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.header-icon:active {\n  transform: scale(0.95);\n}\n\n.header-icon.disabled {\n  opacity: 0.5;\n  background: var(--disabled-color, var(--disabled-text-color));\n}\n\n.header-icon.enabled {\n  background: var(--primary-color, #03a9f4);\n  opacity: 1;\n}\n\n.header-icon ha-icon {\n  --mdc-icon-size: 28px;\n}\n\n.header-text {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n\n.header-title {\n  font-size: 18px;\n  font-weight: 500;\n  color: var(--primary-text-color, #212121);\n  line-height: 24px;\n}\n\n.header-title--hidden {\n  display: none;\n}\n\n.header-status {\n  font-size: 14px;\n  color: var(--secondary-text-color, #757575);\n  line-height: 20px;\n}\n\n.add-button {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--primary-color, #03a9f4);\n  border: none;\n  color: var(--text-primary-on-background, #ffffff);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.add-button:active {\n  transform: scale(0.95);\n}\n\n.add-button ha-icon {\n  --mdc-icon-size: 28px;\n}\n\n/* ========================================\n   ADD SLOT BUTTON\n   ======================================== */\n\n/* Button outline style moved to shared/assets/homie-css.css */\n\n/* ========================================\n   SLOTS CONTAINER\n   ======================================== */\n\n.slots-container {\n  display: flex;\n  flex-direction: column;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n}\n\n.slots-container--empty {\n  display: none;\n}\n\n/* ========================================\n   SLOT CARD (Blue Card Design)\n   ======================================== */\n\n.slot-card {\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  border-radius: var(--ha-card-border-radius, var(--mdc-shape-medium, 8px));\n  padding: var(--ha-card-header-padding, 16px) var(--ha-card-header-padding, 16px) 0 var(--ha-card-header-padding, 16px);\n  color: var(--primary-text-color, #212121);\n  position: relative;\n  box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));\n  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;\n  backdrop-filter: var(--ha-card-backdrop-filter, blur(10px));\n}\n\n/* Active slot (enabled) - same background as header */\n.slot-card:not(.disabled) {\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n}\n\n.slot-card.disabled {\n  opacity: 0.6;\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.5)));\n}\n\n.slot-header {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  margin-bottom: 0;\n}\n\n.slot-icon {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--primary-color, #03a9f4);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  cursor: pointer;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n  color: var(--text-primary-on-background, #ffffff);\n}\n\n.slot-icon:active {\n  transform: scale(0.95);\n}\n\n.slot-icon.enabled {\n  background: var(--primary-color, #03a9f4);\n  opacity: 1;\n}\n\n.slot-icon.disabled {\n  background: var(--disabled-color, var(--disabled-text-color, #9e9e9e));\n  opacity: 0.6;\n}\n\n.slot-icon ha-icon {\n  --mdc-icon-size: 24px;\n}\n\n.slot-info {\n  flex: 1;\n}\n\n.slot-name {\n  font-size: 16px;\n  font-weight: 500;\n  margin-bottom: 4px;\n}\n\n.slot-status {\n  font-size: 14px;\n  color: var(--secondary-text-color, #757575);\n}\n\n.slot-expand {\n  width: 100%;\n  padding: 8px 0;\n  margin-top: var(--mdc-layout-grid-gutter, 12px);\n  border-radius: 0;\n  background: transparent;\n  border: none;\n  border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));\n  color: var(--primary-text-color, #212121);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.slot-expand ha-icon {\n  --mdc-icon-size: 20px;\n  transition: transform 0.2s;\n}\n\n.slot-card.expanded .slot-expand ha-icon {\n  transform: rotate(180deg);\n}\n\n/* Slot expandable, slot-details styles moved to shared/assets/homie-css.css */\n\n.slot-title {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n  width: 100%;\n  flex-basis: 100%;\n  margin-bottom: var(--mdc-layout-grid-gutter, 8px);\n}\n.slot-title ha-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n}\n.slot-title .slot-title-input {\n  flex: 1;\n  min-width: 0;\n  box-sizing: border-box;\n}\n\n.slot-time,\n.slot-duration,\n.slot-hvac-mode {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n}\n\n.slot-time ha-icon,\n.slot-duration ha-icon,\n.slot-hvac-mode ha-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n}\n\n.slot-entities-wrap {\n  margin-top: 12px;\n  padding-top: 12px;\n  border-top: 1px solid var(--_divider);\n  position: relative;\n}\n.slot-entities-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  margin-bottom: 8px;\n}\n.slot-entities-label ha-icon {\n  --mdc-icon-size: 22px;\n  color: var(--_accent);\n}\n/* Slot entities dropdown (same UX as popup) */\n.slot-entities-trigger {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  min-height: 40px;\n  padding: 6px 12px;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_bg-select);\n  cursor: pointer;\n  transition: border-color 0.2s, box-shadow 0.2s;\n}\n.slot-entities-trigger:hover,\n.slot-entities-trigger.open {\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.slot-entities-chips {\n  flex: 1;\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n  align-items: center;\n  min-height: 24px;\n}\n.slot-entities-chips .popup-entity-chip {\n  display: inline-flex;\n  align-items: center;\n  padding: 2px 8px;\n  border-radius: var(--_radius-small);\n  background: var(--_secondary-bg);\n  border: 1px solid var(--_divider);\n  font-size: 12px;\n  color: var(--_text);\n  white-space: nowrap;\n}\n.slot-entities-caret {\n  --mdc-icon-size: 20px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n  transition: transform 0.2s;\n}\n.slot-entities-trigger.open .slot-entities-caret {\n  transform: rotate(180deg);\n}\n.slot-entities-dropdown {\n  display: none;\n  position: absolute;\n  left: 0;\n  right: 0;\n  top: 100%;\n  margin-top: 4px;\n  z-index: 10;\n  flex-direction: column;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_popup-bg);\n  box-shadow: var(--_popup-box-shadow);\n  max-height: 220px;\n  overflow: hidden;\n}\n.slot-entities-wrap .slot-entities-dropdown.open {\n  display: flex;\n}\n.slot-entity-select-all {\n  border-bottom: 1px solid var(--_divider);\n  flex-shrink: 0;\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  padding: 10px 16px;\n  cursor: pointer;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.slot-entity-select-all input {\n  width: 18px;\n  height: 18px;\n  margin: 0;\n  accent-color: var(--_accent);\n  flex-shrink: 0;\n}\n.slot-entities-list {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n.slot-entity-row {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  padding: 8px 0;\n  cursor: pointer;\n  font-size: 14px;\n}\n.slot-entity-row input[type="checkbox"] {\n  width: 18px;\n  height: 18px;\n  margin: 0;\n  accent-color: var(--_accent);\n  flex-shrink: 0;\n}\n.slot-entity-row ha-icon {\n  --mdc-icon-size: 20px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n}\n.slot-entity-name {\n  flex: 1;\n  color: var(--_text);\n}\n/* Shared entities-selector inside slot */\n.slot-entities-wrap .entities-selector-list {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n.slot-entities-wrap .entities-selector-row {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  padding: 8px 0;\n  cursor: pointer;\n  font-size: 14px;\n}\n.slot-entities-wrap .entities-selector-row input[type="checkbox"] {\n  width: 18px;\n  height: 18px;\n  margin: 0;\n  accent-color: var(--_accent);\n  flex-shrink: 0;\n}\n.slot-entities-wrap .entities-selector-row ha-icon {\n  --mdc-icon-size: 20px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n}\n.slot-entities-wrap .entities-selector-entity-name {\n  flex: 1;\n  color: var(--_text);\n}\n.slot-entities-wrap .slot-entities-dropdown .entities-selector-list {\n  overflow-y: auto;\n  overflow-x: hidden;\n  flex: 1;\n  min-height: 0;\n}\n.slot-entities-wrap .slot-entities-dropdown .entities-selector-row {\n  padding: 10px 16px;\n  border-bottom: 1px solid var(--_divider);\n  gap: 12px;\n}\n.slot-entities-wrap .slot-entities-dropdown .entities-selector-row:last-child {\n  border-bottom: none;\n}\n.slot-entities-wrap .slot-entities-dropdown .entities-selector-row:hover {\n  background: var(--_secondary-bg);\n}\n.slot-entities-wrap .entities-selector-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.slot-entities-wrap .entities-selector-row-unsupported .entities-selector-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n.slot-hvac-mode select {\n  flex: 1;\n  min-width: 0;\n  box-sizing: border-box;\n}\n\n/* Time picker styles are now in shared/homie-select/homie-select.css */\n\n.slot-time .time-picker-separator {\n  color: var(--primary-text-color, #212121);\n}\n\n/* Select styles are now in shared/homie-select.css */\n\n.slot-weekdays-wrapper {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n}\n\n.slot-weekdays-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n  flex-shrink: 0;\n}\n\n.slot-weekdays {\n  display: flex;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  flex-wrap: wrap;\n  flex: 1;\n  justify-content: flex-start;\n}\n\n.slot-weekday {\n  padding: var(--mdc-shape-small, 6px) var(--mdc-shape-small, 8px);\n  border-radius: var(--ha-card-border-radius, var(--mdc-shape-small, 4px));\n  background: var(--secondary-background-color, #f5f5f5);\n  border: 2px solid var(--divider-color, rgba(0, 0, 0, 0.12));\n  color: var(--primary-text-color, #212121);\n  font-size: 12px;\n  font-weight: 400;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n  flex-shrink: 0;\n  min-width: fit-content;\n  flex: 1;\n  text-align: center;\n  min-width: 0;\n}\n\n.slot-weekday.active {\n  background: var(--primary-color, #03a9f4);\n  color: var(--text-primary-on-background, #ffffff);\n  font-weight: 600;\n  border-color: var(--primary-color, #03a9f4);\n}\n\n/* Slot delete, empty state styles moved to shared/assets/homie-css.css */\n\n/* Popup overlay, popup-header, popup-body, popup-field styles moved to shared/assets/homie-css.css */\n\n/* Popup content (defaults, override via --homie-slots-popup-*) */\n.popup-content {\n  background: var(--_popup-bg);\n  color: var(--_popup-color);\n  -webkit-backdrop-filter: var(--_popup-backdrop-filter);\n  backdrop-filter: var(--_popup-backdrop-filter);\n  box-shadow: var(--_popup-box-shadow);\n  border-radius: var(--_popup-border-radius);\n  width: var(--_popup-width);\n  max-width: var(--_popup-max-width);\n  min-width: var(--_popup-min-width);\n  max-height: var(--_popup-max-height);\n  overflow-y: auto;\n  animation: slideUp 0.3s;\n}\n\n@keyframes slideUp {\n  from {\n    transform: translateY(20px);\n    opacity: 0;\n  }\n  to {\n    transform: translateY(0);\n    opacity: 1;\n  }\n}\n\n/* Popup select styles are now in shared/homie-select.css */\n\n/* Slot time selects */\n.slot-time .time-selects {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n  width: auto;\n}\n\n/* Slot time select styles are now in shared/homie-select.css */\n\n.slot-time .time-separator {\n  font-size: 14px;\n  color: var(--primary-text-color, #212121);\n}\n\n/* Time selects, weekday selector, popup footer/button styles moved to shared/assets/homie-css.css */\n\n/* ========================================\n   RESPONSIVE\n   ======================================== */\n\n@media (max-width: 480px) {\n  .main-header {\n    padding: var(--mdc-shape-small, 12px);\n  }\n  \n  .header-title {\n    font-size: 16px;\n  }\n  \n  .slot-card {\n    padding: var(--mdc-shape-small, 12px);\n  }\n  \n  :host {\n    --_popup-width: var(--mdc-dialog-width, 95%);\n    --_popup-max-height: var(--mdc-dialog-max-height, 85vh);\n  }\n}\n\n/* ========================================\n   DARK THEME SUPPORT\n   ======================================== */\n\n/* Dark theme adjustments are handled by HA CSS variables */\n/* No additional dark theme styles needed */\n`;
     const mdiFontLink = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@latest/css/materialdesignicons.min.css">`;
 
     // Prepare template data
@@ -2525,36 +2697,29 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       return;
     }
     
-    // Get HVAC modes for popup (exclude 'off')
+    // Get HVAC modes for popup (include 'off' so user can schedule turn-off)
     let hvacModesOptions = '';
     if (this._config && this._config.entity && this._hass) {
       const entityState = this._hass.states[this._config.entity];
       if (entityState && entityState.attributes && entityState.attributes.hvac_modes) {
-        const hvacModes = entityState.attributes.hvac_modes.filter(mode => mode !== 'off');
+        const hvacModes = [...entityState.attributes.hvac_modes];
         hvacModesOptions = hvacModes.map(mode => 
-          `<option value="${mode}">${mode.charAt(0).toUpperCase() + mode.slice(1)}</option>`
+          `<option value="${mode}">${this._formatHvacModeLabel(mode)}</option>`
         ).join('');
       }
     }
     if (!hvacModesOptions) {
       // Fallback if entity not found or no modes available
-      hvacModesOptions = '<option value="heat">Heat</option><option value="cool">Cool</option>';
+      hvacModesOptions = '<option value="off">Off</option><option value="cool">Cool</option>';
     }
     
-    // Replace duration placeholders (step computed so slider can reach max)
-    const minDuration = this._config.min_duration || 15;
-    const maxDuration = this._config.max_duration || 1440;
-    const durationStep = window.DurationSelector && typeof window.DurationSelector.computeStep === 'function'
-      ? window.DurationSelector.computeStep(minDuration, maxDuration, this._config.duration_step || 15)
-      : (this._config.duration_step || 15);
-    // For climate, default duration is null (empty)
-    const defaultDuration = '';
-    
+    const { minDuration, maxDuration } = this._getDurationConfig();
+    const defaultDurationHours = 1;
     let processedTemplate = template
+      .replace(/\{\{DURATION_LABEL\}\}/g, 'Duration (hours)')
       .replace(/\{\{DURATION_MIN\}\}/g, minDuration)
       .replace(/\{\{DURATION_MAX\}\}/g, maxDuration)
-      .replace(/\{\{DURATION_STEP\}\}/g, durationStep)
-      .replace(/\{\{DURATION_VALUE\}\}/g, defaultDuration)
+      .replace(/\{\{DURATION_VALUE\}\}/g, defaultDurationHours)
       .replace(/\{\{ITEM_ID\}\}/g, ''); // Empty for popup
     
     const entities = this._getEntities();
@@ -2626,7 +2791,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     let currentHvacMode = null;
     if (item.service_start && item.service_start.value && item.service_start.value.hvac_mode) {
       currentHvacMode = item.service_start.value.hvac_mode;
-      statusPrefix = item.enabled ? currentHvacMode.charAt(0).toUpperCase() + currentHvacMode.slice(1) : 'Off';
+      statusPrefix = item.enabled ? this._formatHvacModeLabel(currentHvacMode) : 'Off';
     }
     
     const entityForMode = item.entity_id || this._config?.entity;
@@ -2634,31 +2799,66 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     if (this._config && entityForMode && this._hass) {
       const entityState = this._hass.states[entityForMode];
       if (entityState && entityState.attributes && entityState.attributes.hvac_modes) {
-        let hvacModes = entityState.attributes.hvac_modes.filter(mode => mode !== 'off');
+        let hvacModes = [...entityState.attributes.hvac_modes]; // include 'off' to allow schedule turn-off
         if (currentHvacMode && !hvacModes.includes(currentHvacMode)) {
           hvacModes = [currentHvacMode, ...hvacModes];
         }
         hvacModeOptions = hvacModes.map(mode => {
           const selected = currentHvacMode === mode ? 'selected' : '';
-          const label = mode.charAt(0).toUpperCase() + mode.slice(1);
+          const label = this._formatHvacModeLabel(mode);
           return `<option value="${mode}" ${selected}>${label}</option>`;
         }).join('');
       }
     }
     if (!hvacModeOptions) {
       // Fallback if entity not found or no modes available
-      const heatSelected = currentHvacMode === 'heat' ? 'selected' : '';
+      const offSelected = currentHvacMode === 'off' ? 'selected' : '';
       const coolSelected = currentHvacMode === 'cool' ? 'selected' : '';
-      hvacModeOptions = `<option value="heat" ${heatSelected}>Heat</option><option value="cool" ${coolSelected}>Cool</option>`;
+      hvacModeOptions = `<option value="off" ${offSelected}>Off</option><option value="cool" ${coolSelected}>Cool</option>`;
+    }
+
+    // Fan options from entity fan_modes
+    let fanOptions = '<option value="">—</option>';
+    const currentFanMode = item.service_start?.value?.fan_mode ?? '';
+    if (entityForMode && this._hass) {
+      const entityState = this._hass.states[entityForMode];
+      const fanModes = entityState?.attributes?.fan_modes;
+      if (Array.isArray(fanModes) && fanModes.length) {
+        fanOptions = fanModes.map(fm => {
+          const sel = currentFanMode === fm ? 'selected' : '';
+          const label = (fm || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          return `<option value="${fm}" ${sel}>${label}</option>`;
+        }).join('');
+        if (currentFanMode && !fanModes.includes(currentFanMode)) {
+          fanOptions = `<option value="${currentFanMode}" selected>${currentFanMode}</option>` + fanOptions;
+        }
+      }
+    }
+
+    // Temp min/max/value from entity
+    let tempMin = 5, tempMax = 35, tempValue = 21;
+    if (entityForMode && this._hass) {
+      const entityState = this._hass.states[entityForMode];
+      const attrs = entityState?.attributes || {};
+      if (attrs.min_temp != null) tempMin = attrs.min_temp;
+      if (attrs.max_temp != null) tempMax = attrs.max_temp;
+      const savedTemp = item.service_start?.value?.temperature;
+      if (savedTemp != null && savedTemp !== '') {
+        tempValue = Number(savedTemp);
+        if (Number.isNaN(tempValue)) tempValue = attrs.temperature ?? 21;
+      } else if (attrs.temperature != null) {
+        tempValue = attrs.temperature;
+      }
+      tempValue = Math.max(tempMin, Math.min(tempMax, tempValue));
     }
     
-    //     
-    const durationStr = this._formatDuration(item.duration);
+    const showDuration = currentHvacMode !== 'off';
+    const durationStr = showDuration ? this._formatDuration(item.duration) : '';
     const slotStatus = `${statusPrefix}, ${daysText} on ${item.time}${durationStr}`;
     
     // Prepare time placeholders
     const [hours, minutes] = item.time.split(':');
-    const roundedMinutes = String(Math.round(parseInt(minutes || 0) / 5) * 5).padStart(2, '0');
+    const minsVal = parseInt(minutes, 10); const roundedMinutes = String((Number.isNaN(minsVal) ? 0 : Math.round(minsVal / 5) * 5)).padStart(2, '0');
     const timeHoursPlaceholders = {};
     const timeMinutesPlaceholders = {};
     for (let i = 0; i < 24; i++) {
@@ -2670,13 +2870,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       timeMinutesPlaceholders[`TIME_MINUTES_${minuteStr}`] = minuteStr === roundedMinutes ? 'selected' : '';
     }
 
-    // Replace duration placeholders (step computed so slider can reach max)
-    const minDuration = this._config.min_duration || 15;
-    const maxDuration = this._config.max_duration || 1440;
-    const durationStep = window.DurationSelector && typeof window.DurationSelector.computeStep === 'function'
-      ? window.DurationSelector.computeStep(minDuration, maxDuration, this._config.duration_step || 15)
-      : (this._config.duration_step || 15);
-    const durationValue = item.duration || '';
+    const { minDuration, maxDuration } = this._getDurationConfig();
+    const durationValueHours = item.duration != null ? (ScheduleHelper && ScheduleHelper.durationMinutesToHours ? ScheduleHelper.durationMinutesToHours(item.duration) : item.duration / 60) : '';
     
     // Replace placeholders
     let result = template
@@ -2689,11 +2884,15 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       .replace(/\{\{ICON_CLASS\}\}/g, (slotEnabled && item.enabled) ? 'enabled' : 'disabled')
       .replace(/\{\{SLOT_STATUS\}\}/g, slotStatus)
       .replace(/\{\{ITEM_TIME\}\}/g, item.time)
+      .replace(/\{\{DURATION_LABEL\}\}/g, 'Duration (hours)')
       .replace(/\{\{DURATION_MIN\}\}/g, minDuration)
       .replace(/\{\{DURATION_MAX\}\}/g, maxDuration)
-      .replace(/\{\{DURATION_STEP\}\}/g, durationStep)
-      .replace(/\{\{DURATION_VALUE\}\}/g, durationValue)
-      .replace(/\{\{HVAC_MODE_OPTIONS\}\}/g, hvacModeOptions);
+      .replace(/\{\{DURATION_VALUE\}\}/g, durationValueHours)
+      .replace(/\{\{HVAC_MODE_OPTIONS\}\}/g, hvacModeOptions)
+      .replace(/\{\{FAN_OPTIONS\}\}/g, fanOptions)
+      .replace(/\{\{TEMP_MIN\}\}/g, tempMin)
+      .replace(/\{\{TEMP_MAX\}\}/g, tempMax)
+      .replace(/\{\{TEMP_VALUE\}\}/g, tempValue);
     
     // Replace time hour placeholders
     for (let i = 0; i < 24; i++) {
@@ -2714,10 +2913,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     if (slotCard) {
       WeekdaySelector.setSelectedWeekdays(tempDiv, item.weekdays, slotCard);
       
-      // Hide duration selector if duration is not set
-      const durationEl = slotCard.querySelector('.slot-duration');
+      // Hide duration when mode is 'off' or duration not set
+      const durationEl = slotCard.querySelector('[data-slot-form="duration-wrapper"]');
       if (durationEl) {
-        if (item.duration) {
+        if (showDuration && item.duration) {
           durationEl.style.display = '';
         } else {
           durationEl.style.display = 'none';
@@ -2725,10 +2924,18 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       }
       
       // Verify and set HVAC mode select value explicitly
-      const hvacModeSelect = slotCard.querySelector('[data-action="update-hvac-mode"]');
+      const hvacModeSelect = slotCard.querySelector('[data-slot-form="mode"]');
       if (hvacModeSelect && currentHvacMode) {
         hvacModeSelect.value = currentHvacMode;
-      } else if (hvacModeSelect) {
+      }
+      const fanSelect = slotCard.querySelector('[data-slot-form="fan"]');
+      if (fanSelect && currentFanMode !== undefined) {
+        const opt = Array.from(fanSelect.querySelectorAll('option')).find(o => o.value === currentFanMode);
+        if (opt) fanSelect.value = opt.value;
+      }
+      const tempInput = slotCard.querySelector('[data-slot-form="temp"]');
+      if (tempInput) {
+        tempInput.value = tempValue;
       }
       
       result = tempDiv.innerHTML;
@@ -2772,38 +2979,33 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       saveButton.addEventListener('click', () => this._saveSlot());
     }
 
-    // Popup weekday selection - use shared component
-    // Note: attachEventListeners will fix the active state if Custom is selected
-    WeekdaySelector.attachEventListeners(this.shadowRoot);
+    // Popup weekday selection - scope to add form only so Custom opens in popup, not in a slot
+    const addRoot = this._getAddFormRoot();
+    if (addRoot) WeekdaySelector.attachEventListeners(addRoot);
     
     // Popup duration selection - attach listeners only when wrapper is visible
     // (will be attached when checkbox is checked)
     
-    // Duration enabled (ha-switch) - show/hide duration selector
-    const durationEnabledCheckbox = this.shadowRoot.getElementById('popup-duration-enabled');
-    const durationWrapper = this.shadowRoot.getElementById('popup-duration-wrapper');
-    const durationRow = this.shadowRoot.querySelector('.popup-duration-row');
+    // Duration enabled (ha-switch) - show/hide duration selector (addRoot already from weekday block above)
+    const durationEnabledCheckbox = addRoot?.querySelector('[data-slot-form="duration-enabled"]');
+    const durationWrapper = addRoot?.querySelector('[data-slot-form="duration-wrapper"]');
+    const durationRow = addRoot?.querySelector('.slot-form-duration-row');
     if (durationEnabledCheckbox && durationWrapper) {
       const syncDurationWrapper = () => {
         if (durationEnabledCheckbox.checked) {
           durationWrapper.style.display = 'block';
           const durationInput = durationWrapper.querySelector('[data-action="update-duration"]');
           const durationSlider = durationWrapper.querySelector('[data-action="update-duration-slider"]');
-          const minDuration = this._config.min_duration || 15;
-          const maxDuration = this._config.max_duration || 1440;
-          const allowedValues = window.DurationSelector && typeof window.DurationSelector.computeAllowedValues === 'function'
-            ? window.DurationSelector.computeAllowedValues(minDuration, maxDuration, 5)
-            : (() => { const a = []; for (let i = minDuration; i <= maxDuration; i += 5) a.push(i); if (a[a.length - 1] < maxDuration) a.push(maxDuration); return a; })();
-          durationWrapper.dataset.durationValues = allowedValues.join(',');
+          const { minDuration, maxDuration } = this._getDurationConfig();
           if (durationInput) {
             durationInput.min = minDuration;
             durationInput.max = maxDuration;
-            durationInput.step = 1;
+            durationInput.step = '0.5';
           }
           if (durationSlider) {
-            durationSlider.min = 0;
-            durationSlider.max = Math.max(0, allowedValues.length - 1);
-            durationSlider.step = 1;
+            durationSlider.min = minDuration;
+            durationSlider.max = maxDuration;
+            durationSlider.step = '0.5';
           }
           DurationSelector.setSelectedDuration(durationWrapper, minDuration);
           DurationSelector.attachEventListeners(durationWrapper);
@@ -2823,16 +3025,20 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       }
     }
 
-    const hvacModeSelect = this.shadowRoot.getElementById('popup-hvac-mode');
+    const hvacModeSelect = addRoot?.querySelector('[data-slot-form="mode"]');
     if (hvacModeSelect) {
-      hvacModeSelect.addEventListener('change', () => this._updateHvacModeWarning());
+      hvacModeSelect.addEventListener('change', () => {
+        this._updateHvacModeWarning();
+        this._syncPopupDurationVisibility();
+      });
     }
+    this._syncPopupDurationVisibility();
     
-    // Ensure Everyday is active after attaching listeners (in case popup is already open)
+    // Ensure Everyday is active in popup after attaching listeners (reset only popup form, not slots)
     const popup = this.shadowRoot.getElementById('add-popup');
-    if (popup && popup.style.display !== 'none') {
+    if (popup && popup.style.display !== 'none' && addRoot) {
       requestAnimationFrame(() => {
-        WeekdaySelector.reset(this.shadowRoot);
+        WeekdaySelector.reset(addRoot);
       });
     }
 
@@ -2843,16 +3049,13 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       const item = items.find(i => i.id === itemId);
       if (!item) return;
 
-      // Toggle item enabled (via icon)
+      // Toggle item enabled (via icon) - save immediately
       const itemIcon = itemEl.querySelector('.slot-icon[data-action="toggle-item"]');
       if (itemIcon) {
         itemIcon.addEventListener('click', () => {
-          // Get fresh item data on each click to ensure we have current state
           const currentItems = this._getItems();
           const currentItem = currentItems.find(i => i.id === itemId);
-          if (currentItem) {
-            this._updateItem(itemId, { enabled: !currentItem.enabled });
-          }
+          if (currentItem) this._updateItem(itemId, { enabled: !currentItem.enabled });
         });
       }
 
@@ -2904,159 +3107,222 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         });
       }
 
-      // Slot title input - same pattern as boiler slots; update display on input, save on blur/debounce
-      const titleInput = itemEl.querySelector('.slot-title-input');
+      // Slot title input - save on blur
+      const titleInput = itemEl.querySelector('[data-slot-form="title"]');
       if (titleInput) {
-        let titleDebounce = null;
-        const applyTitle = () => {
+        const saveTitle = () => {
           if (itemEl.dataset.updating === 'true') return;
           const newTitle = titleInput.value.trim() || null;
           this._updateItem(itemId, { title: newTitle });
         };
-        const refreshSlotNameDisplay = () => {
-          const slotEntitiesWrap = itemEl.querySelector('.slot-entities-wrap');
-          const listEl = slotEntitiesWrap?.querySelector('.entities-selector-list');
-          const names = listEl ? Array.from(listEl.querySelectorAll('input[name="entities-selector-entity"]:checked')).map(inp => {
-            const row = inp.closest('.entities-selector-row');
-            const nameEl = row?.querySelector('.entities-selector-entity-name');
-            return nameEl ? nameEl.textContent : inp.value;
-          }) : [];
-          const slotNumber = Array.from(this.shadowRoot.querySelectorAll('.slot-card')).indexOf(itemEl) + 1;
-          const baseName = titleInput.value.trim() || `Slot ${slotNumber}`;
-          const entityLabel = names.length > 0 ? names.join(', ') : '';
-          const slotName = baseName + (entityLabel ? ` (${entityLabel})` : '');
-          const nameEl = itemEl.querySelector('.slot-name');
-          if (nameEl) nameEl.textContent = slotName;
-          const removeSpan = itemEl.querySelector('.slot-delete span');
-          if (removeSpan) removeSpan.textContent = 'Remove ' + baseName;
-        };
-        titleInput.addEventListener('blur', () => {
-          clearTimeout(titleDebounce);
-          applyTitle();
-        });
-        titleInput.addEventListener('input', () => {
-          refreshSlotNameDisplay();
-          clearTimeout(titleDebounce);
-          titleDebounce = setTimeout(applyTitle, 500);
-        });
+        titleInput.addEventListener('blur', saveTitle);
         titleInput.addEventListener('click', (e) => e.stopPropagation());
       }
 
-      // Update time - hours and minutes selects
-      const hoursSelect = itemEl.querySelector('.slot-time-hours');
-      const minutesSelect = itemEl.querySelector('.slot-time-minutes');
-      
+      // Time selects - save on change (blur equivalent for select)
+      const hoursSelect = itemEl.querySelector('[data-slot-form="time-hours"]');
+      const minutesSelect = itemEl.querySelector('[data-slot-form="time-minutes"]');
       if (hoursSelect) {
-        const hoursHandler = (e) => {
+        const newHoursSelect = hoursSelect.cloneNode(true);
+        hoursSelect.parentNode.replaceChild(newHoursSelect, hoursSelect);
+        newHoursSelect.addEventListener('change', () => {
           if (itemEl.dataset.updating === 'true') return;
-          e.stopPropagation();
           const currentItems = this._getItems();
           const currentItem = currentItems.find(i => i.id === itemId);
           if (!currentItem) return;
-          const [oldHours, oldMinutes] = currentItem.time.split(':');
-          const newTime = `${e.target.value}:${oldMinutes}`;
+          const [, oldMinutes] = currentItem.time.split(':');
+          const newTime = `${newHoursSelect.value}:${oldMinutes}`;
           this._updateItem(itemId, { time: newTime });
-        };
-        const newHoursSelect = hoursSelect.cloneNode(true);
-        hoursSelect.parentNode.replaceChild(newHoursSelect, hoursSelect);
-        newHoursSelect.addEventListener('change', hoursHandler);
-        newHoursSelect.addEventListener('click', (e) => {
-          e.stopPropagation();
         });
+        newHoursSelect.addEventListener('click', (e) => e.stopPropagation());
         const [hours] = item.time.split(':');
         newHoursSelect.value = hours;
       }
-      
       if (minutesSelect) {
-        const minutesHandler = (e) => {
+        const newMinutesSelect = minutesSelect.cloneNode(true);
+        minutesSelect.parentNode.replaceChild(newMinutesSelect, minutesSelect);
+        newMinutesSelect.addEventListener('change', () => {
           if (itemEl.dataset.updating === 'true') return;
-          e.stopPropagation();
           const currentItems = this._getItems();
           const currentItem = currentItems.find(i => i.id === itemId);
           if (!currentItem) return;
-          const [oldHours, oldMinutes] = currentItem.time.split(':');
-          const newTime = `${oldHours}:${e.target.value}`;
+          const [oldHours] = currentItem.time.split(':');
+          const newTime = `${oldHours}:${newMinutesSelect.value}`;
           this._updateItem(itemId, { time: newTime });
-        };
-        const newMinutesSelect = minutesSelect.cloneNode(true);
-        minutesSelect.parentNode.replaceChild(newMinutesSelect, minutesSelect);
-        newMinutesSelect.addEventListener('change', minutesHandler);
-        newMinutesSelect.addEventListener('click', (e) => {
-          e.stopPropagation();
         });
+        newMinutesSelect.addEventListener('click', (e) => e.stopPropagation());
         const [, minutes] = item.time.split(':');
-        const roundedMinutes = String(Math.round(parseInt(minutes || 0) / 5) * 5).padStart(2, '0');
+        const minsVal = parseInt(minutes, 10); const roundedMinutes = String((Number.isNaN(minsVal) ? 0 : Math.round(minsVal / 5) * 5)).padStart(2, '0');
         newMinutesSelect.value = roundedMinutes;
       }
 
-      // Update duration - use shared component (only if duration is set)
-      const durationEl = itemEl.querySelector('.slot-duration');
-      if (durationEl) {
-        if (item.duration) {
-          durationEl.style.display = '';
-          // First, set the initial duration value
-          DurationSelector.setDurationInSlot(itemEl, item.duration, this._config);
-          // Then attach event listeners
-          DurationSelector.attachEventListenersInSlot(itemEl, (duration) => {
+      // Duration - save on blur (DurationSelector calls callback on blur). Only touched when user changes it or mode=off.
+      const durationWrapper = itemEl.querySelector('[data-slot-form="duration-wrapper"]');
+      const durationEnabledSwitch = itemEl.querySelector('[data-slot-form="duration-enabled"]');
+      const durationRow = itemEl.querySelector('.slot-form-duration-row');
+      const slotHvacMode = item.service_start?.value?.hvac_mode;
+      const hasDuration = slotHvacMode !== 'off' && item.duration != null;
+      if (durationEnabledSwitch) durationEnabledSwitch.checked = !!hasDuration;
+      if (durationWrapper) {
+        durationWrapper.style.display = hasDuration ? 'block' : 'none';
+        if (hasDuration) {
+          DurationSelector.setDurationInSlot(itemEl, item.duration != null ? (ScheduleHelper && ScheduleHelper.durationMinutesToHours ? ScheduleHelper.durationMinutesToHours(item.duration) : item.duration / 60) : null, this._config);
+          DurationSelector.attachEventListenersInSlot(itemEl, (durationHours) => {
             if (itemEl.dataset.updating === 'true') return;
-            this._updateItem(itemId, { duration });
+            const modeSelect = itemEl.querySelector('[data-slot-form="mode"]');
+            if (modeSelect?.value === 'off') return;
+            const currentItems = this._getItems();
+            const currentItem = currentItems.find(i => i.id === itemId);
+            const hvacMode = modeSelect?.value || 'heat';
+            const durationMins = (ScheduleHelper && ScheduleHelper.durationHoursToMinutes) ? ScheduleHelper.durationHoursToMinutes(durationHours) : (durationHours != null ? Math.round(Number(durationHours) * 60) : null);
+            const serviceEnd = durationMins ? ScheduleHelper.createClimateServices(currentItem?.entity_id || this._config?.entity, hvacMode).service_end : null;
+            this._updateItem(itemId, { duration: durationMins, service_end: serviceEnd });
           }, this._config);
-        } else {
-          durationEl.style.display = 'none';
+        }
+      }
+      if (durationEnabledSwitch && durationWrapper) {
+        const syncSlotDurationUI = () => {
+          const checked = !!durationEnabledSwitch.checked;
+          if (checked) {
+            durationWrapper.style.display = 'block';
+            const { minDuration } = this._getDurationConfig();
+            const currentItems = this._getItems();
+            const currentItem = currentItems.find(i => i.id === itemId);
+            const keepDuration = currentItem?.service_start?.value?.hvac_mode !== 'off' && currentItem?.duration != null;
+            const durationValHours = keepDuration ? (ScheduleHelper && ScheduleHelper.durationMinutesToHours ? ScheduleHelper.durationMinutesToHours(currentItem.duration) : currentItem.duration / 60) : minDuration;
+            DurationSelector.setSelectedDuration(durationWrapper, durationValHours);
+            DurationSelector.attachEventListenersInSlot(itemEl, (durationHours) => {
+              if (itemEl.dataset.updating === 'true') return;
+              const modeSelect = itemEl.querySelector('[data-slot-form="mode"]');
+              if (modeSelect?.value === 'off') return;
+              const hvacMode = modeSelect?.value || 'heat';
+              const durationMins = (ScheduleHelper && ScheduleHelper.durationHoursToMinutes) ? ScheduleHelper.durationHoursToMinutes(durationHours) : (durationHours != null ? Math.round(Number(durationHours) * 60) : null);
+              const serviceEnd = durationMins ? ScheduleHelper.createClimateServices(currentItem?.entity_id || this._config?.entity, hvacMode).service_end : null;
+              this._updateItem(itemId, { duration: durationMins, service_end: serviceEnd });
+            }, this._config);
+            const hvacMode = currentItem?.service_start?.value?.hvac_mode || 'heat';
+            const serviceEnd = ScheduleHelper.createClimateServices(currentItem?.entity_id || this._config?.entity, hvacMode).service_end;
+            const durationMinsVal = (ScheduleHelper && ScheduleHelper.durationHoursToMinutes) ? ScheduleHelper.durationHoursToMinutes(durationValHours) : (durationValHours != null ? Math.round(Number(durationValHours) * 60) : null);
+            this._updateItem(itemId, { duration: durationMinsVal, service_end: serviceEnd });
+          } else {
+            durationWrapper.style.display = 'none';
+            DurationSelector.reset(itemEl, null);
+            this._updateItem(itemId, { clear_duration: true });
+          }
+        };
+        durationEnabledSwitch.addEventListener('change', () => syncSlotDurationUI());
+        durationEnabledSwitch.addEventListener('click', (e) => e.stopPropagation());
+        if (durationRow) {
+          durationRow.addEventListener('click', (e) => {
+            const path = e.composedPath && e.composedPath();
+            if (path && path.some(el => el && el.tagName && el.tagName.toLowerCase() === 'ha-switch')) return;
+            e.stopPropagation();
+            e.preventDefault();
+            durationEnabledSwitch.checked = !durationEnabledSwitch.checked;
+            syncSlotDurationUI();
+          });
         }
       }
 
-      // Update HVAC mode - use data-action selector to match template
-      const hvacModeSelect = itemEl.querySelector('[data-action="update-hvac-mode"]');
+      // Build service_start from slot form (mode, fan, temp)
+      const getServiceStartFromSlotForm = () => {
+        const currentItems = this._getItems();
+        const currentItem = currentItems.find(i => i.id === itemId);
+        if (!currentItem) return null;
+        const modeSelect = itemEl.querySelector('[data-slot-form="mode"]');
+        const fanSelect = itemEl.querySelector('[data-slot-form="fan"]');
+        const tempInput = itemEl.querySelector('[data-slot-form="temp"]');
+        const hvacMode = modeSelect?.value || currentItem.service_start?.value?.hvac_mode || 'heat';
+        const value = { entity_id: currentItem.entity_id, hvac_mode: hvacMode };
+        if (fanSelect?.value) value.fan_mode = fanSelect.value;
+        if (tempInput && tempInput.value !== '' && !Number.isNaN(Number(tempInput.value))) {
+          value.temperature = parseFloat(tempInput.value);
+        }
+        return { name: 'climate.set_hvac_mode', value };
+      };
+
+      // HVAC mode - save on change. When off: clear duration. When heat/cool: keep duration, never reset it.
+      const hvacModeSelect = itemEl.querySelector('[data-slot-form="mode"]');
       if (hvacModeSelect) {
         const hvacModeHandler = (e) => {
           if (itemEl.dataset.updating === 'true') return;
           e.stopPropagation();
+          const newHvacMode = e.target.value;
           const currentItems = this._getItems();
           const currentItem = currentItems.find(i => i.id === itemId);
-          if (!currentItem) {
-            return;
-          }
-          
-          const newHvacMode = e.target.value;
-          
-          const serviceStart = {
-            name: 'climate.set_hvac_mode',
-            value: {
-              entity_id: currentItem.entity_id,
-              hvac_mode: newHvacMode
+          if (!currentItem) return;
+          const durationWrapper = itemEl.querySelector('[data-slot-form="duration-wrapper"]');
+          const durationEnabledSwitch = itemEl.querySelector('[data-slot-form="duration-enabled"]');
+          if (newHvacMode === 'off') {
+            if (durationEnabledSwitch) durationEnabledSwitch.checked = false;
+            if (durationWrapper) {
+              durationWrapper.style.display = 'none';
+              DurationSelector.reset(itemEl, null);
             }
-          };
-          
-          // If item has duration and service_end, keep service_end as is
-          const updates = { service_start: serviceStart };
-          if (currentItem.duration && currentItem.service_end) {
-            // Keep service_end as is (it should be 'off' mode)
-            updates.service_end = currentItem.service_end;
+            const serviceStart = { name: 'climate.set_hvac_mode', value: { entity_id: currentItem.entity_id, hvac_mode: 'off' } };
+            this._updateItem(itemId, { service_start: serviceStart, clear_duration: true });
+          } else {
+            if (durationEnabledSwitch) durationEnabledSwitch.checked = true;
+            if (durationWrapper) {
+              durationWrapper.style.display = 'block';
+              const { minDuration } = this._getDurationConfig();
+              const hadDuration = currentItem.service_start?.value?.hvac_mode !== 'off' && currentItem.duration != null;
+              DurationSelector.setDurationInSlot(itemEl, hadDuration ? (ScheduleHelper && ScheduleHelper.durationMinutesToHours ? ScheduleHelper.durationMinutesToHours(currentItem.duration) : currentItem.duration / 60) : minDuration, this._config);
+              DurationSelector.attachEventListenersInSlot(itemEl, (durationHours) => {
+                if (itemEl.dataset.updating === 'true') return;
+                const durationMins = (ScheduleHelper && ScheduleHelper.durationHoursToMinutes) ? ScheduleHelper.durationHoursToMinutes(durationHours) : (durationHours != null ? Math.round(Number(durationHours) * 60) : null);
+                this._updateItem(itemId, { duration: durationMins });
+              }, this._config);
+            }
+            const serviceStart = getServiceStartFromSlotForm();
+            if (serviceStart) {
+              const updates = { service_start: serviceStart };
+              if (currentItem.duration != null) {
+                updates.service_end = ScheduleHelper.createClimateServices(currentItem.entity_id, newHvacMode).service_end;
+              }
+              this._updateItem(itemId, updates);
+            }
           }
-          
-          this._updateItem(itemId, updates);
-          const wrap = itemEl.querySelector('.slot-entities-wrap');
+          const wrap = itemEl.querySelector('[data-slot-form="entities-wrap"]');
           if (wrap) this._updateSlotEntitiesForMode(wrap, itemEl);
         };
-        // Clone node to remove all event listeners
         const newHvacModeSelect = hvacModeSelect.cloneNode(true);
         hvacModeSelect.parentNode.replaceChild(newHvacModeSelect, hvacModeSelect);
         newHvacModeSelect.addEventListener('change', hvacModeHandler);
-        newHvacModeSelect.addEventListener('click', (e) => {
-          e.stopPropagation();
-        });
+        newHvacModeSelect.addEventListener('click', (e) => e.stopPropagation());
       }
 
-      const slotEntitiesWrap = itemEl.querySelector('.slot-entities-wrap');
+      // Fan - save on change
+      const fanSelect = itemEl.querySelector('[data-slot-form="fan"]');
+      if (fanSelect) {
+        const newFanSelect = fanSelect.cloneNode(true);
+        fanSelect.parentNode.replaceChild(newFanSelect, fanSelect);
+        newFanSelect.addEventListener('change', () => {
+          if (itemEl.dataset.updating === 'true') return;
+          const serviceStart = getServiceStartFromSlotForm();
+          if (serviceStart) this._updateItem(itemId, { service_start: serviceStart });
+        });
+        newFanSelect.addEventListener('click', (e) => e.stopPropagation());
+      }
+
+      // Temp - save on blur
+      const tempInput = itemEl.querySelector('[data-slot-form="temp"]');
+      if (tempInput) {
+        const saveTemp = () => {
+          if (itemEl.dataset.updating === 'true') return;
+          const serviceStart = getServiceStartFromSlotForm();
+          if (serviceStart) this._updateItem(itemId, { service_start: serviceStart });
+        };
+        tempInput.addEventListener('change', saveTemp);
+        tempInput.addEventListener('blur', saveTemp);
+        tempInput.addEventListener('click', (e) => e.stopPropagation());
+      }
+
+      const slotEntitiesWrap = itemEl.querySelector('[data-slot-form="entities-wrap"]');
       if (slotEntitiesWrap) {
         const entities = this._getEntities();
-        if (entities.length <= 1) {
-          slotEntitiesWrap.style.display = 'none';
-        } else {
-          slotEntitiesWrap.style.display = '';
-        }
-        if (window.EntitiesSelector && window.EntitiesSelector.attachEntitiesList && entities.length > 1) {
+        slotEntitiesWrap.style.display = '';
+        if (window.EntitiesSelector && window.EntitiesSelector.attachEntitiesList && entities.length >= 1) {
           const bridgeState = this._getBridgeState();
           const allItems = bridgeState?.attributes?.items || [];
           const entitySet = new Set(entities);
@@ -3067,7 +3333,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           const entityIdsToItemIds = {};
           sameSlotItems.forEach(i => { entityIdsToItemIds[i.entity_id] = i.id; });
           slotEntitiesWrap.dataset.slotEntityIds = JSON.stringify(entityIdsToItemIds);
-          const slotHvacSelect = itemEl.querySelector('[data-action="update-hvac-mode"]');
+          const slotHvacSelect = itemEl.querySelector('[data-slot-form="mode"]');
           const isEntityDisabled = (entityId) => {
             if (!slotHvacSelect || !slotHvacSelect.value || !this._hass) return false;
             const state = this._hass.states[entityId];
@@ -3079,61 +3345,94 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
             checkedEntityIds: sameSlotItems.map(i => i.entity_id),
             hass: this._hass,
             isEntityDisabled,
-            onCheck: async (entityId) => {
-              const timeHours = itemEl.querySelector('[data-action="update-time-hours"]');
-              const timeMinutes = itemEl.querySelector('[data-action="update-time-minutes"]');
-              const time = (timeHours && timeMinutes) ? `${timeHours.value}:${timeMinutes.value}` : item.time;
-              const selectedWeekdays = WeekdaySelector.getSelectedWeekdays(itemEl);
-              const weekdays = selectedWeekdays.length > 0 ? selectedWeekdays : item.weekdays;
-              const hvacSelect = itemEl.querySelector('[data-action="update-hvac-mode"]');
-              const hvacMode = hvacSelect && hvacSelect.value ? hvacSelect.value : (item.service_start?.value?.hvac_mode || 'heat');
-              let duration = null;
-              if (window.DurationSelector) {
-                const wrapper = itemEl.querySelector('.duration-selector-wrapper');
-                if (wrapper) duration = DurationSelector.getSelectedDuration(itemEl);
-              }
-              const service_start = ScheduleHelper.createClimateServices(entityId, hvacMode).service_start;
-              const service_end = duration ? ScheduleHelper.createClimateServices(entityId, hvacMode).service_end : null;
-              await ScheduleHelper.addScheduleSlot({
-                hass: this._hass,
-                callService: async (service, data) => this._callService(service, data),
-                getBridgeState: () => this._getBridgeState(),
-                entity_id: entityId,
-                time,
-                duration: duration || undefined,
-                weekdays,
-                service_start,
-                service_end,
-                bridgeSensor: this._bridgeSensor,
-                onRender: () => { this.hass = { ...this._hass }; this.render().catch(() => {}); }
-              });
-              this._optimisticBridgeState = null;
-              this.hass = { ...this._hass };
-              await this.render();
-            },
-            onUncheck: async (entityId) => {
-              const ids = JSON.parse(slotEntitiesWrap.dataset.slotEntityIds || '{}');
-              const itemIdToDelete = ids[entityId];
-              if (itemIdToDelete) await this._deleteItem(itemIdToDelete);
-            }
+            onCheck: () => { /* API and render only when dropdown is closed */ },
+            onUncheck: () => { /* API and render only when dropdown is closed */ }
           });
-          this._updateSlotEntitiesChips(slotEntitiesWrap);
-          const trigger = slotEntitiesWrap.querySelector('.slot-entities-trigger');
-          const dropdown = slotEntitiesWrap.querySelector('.slot-entities-dropdown');
-          const selectAllInput = slotEntitiesWrap.querySelector('.slot-entities-select-all-input');
+          this._updateModeOptionsForWrap(slotEntitiesWrap, slotHvacSelect);
+          this._updateModeWarningForWrap(slotEntitiesWrap, slotHvacSelect, null);
+          const trigger = slotEntitiesWrap.querySelector('[data-slot-form="entities-trigger"]');
+          const dropdown = slotEntitiesWrap.querySelector('[data-slot-form="entities-dropdown"]');
+          const selectAllInput = slotEntitiesWrap.querySelector('[data-slot-form="entities-select-all"]');
           if (trigger && dropdown) {
+            if (!dropdown._slotClickStopped) {
+              dropdown.addEventListener('click', (e) => e.stopPropagation());
+              dropdown._slotClickStopped = true;
+            }
             trigger.addEventListener('click', (e) => {
               e.stopPropagation();
+              e.preventDefault();
               const open = dropdown.classList.toggle('open');
               trigger.classList.toggle('open', open);
               if (open) {
-                const close = (ev) => {
-                  if (slotEntitiesWrap.contains(ev.target)) return;
-                  document.removeEventListener('click', close);
+                const bridgeState = this._getBridgeState();
+                const allItems = bridgeState?.attributes?.items || [];
+                const sameSlotItemsNow = allItems.filter(i =>
+                  i && i.temporary !== true && entitySet.has(i.entity_id) &&
+                  i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
+                );
+                const initialChecked = new Set(sameSlotItemsNow.map(i => i.entity_id));
+                const initialIds = {};
+                sameSlotItemsNow.forEach(i => { initialIds[i.entity_id] = i.id; });
+                const close = async (ev) => {
+                  const path = ev.composedPath && ev.composedPath();
+                  const inside = path && path.some(el => el === slotEntitiesWrap || el === dropdown || (el && el.nodeType === 1 && (slotEntitiesWrap.contains(el) || dropdown.contains(el))));
+                  if (inside) return;
+                  document.removeEventListener('mousedown', close);
                   dropdown.classList.remove('open');
                   trigger.classList.remove('open');
+                  const listEl = slotEntitiesWrap.querySelector('.entities-selector-list');
+                  const checkedInputs = listEl ? listEl.querySelectorAll('input[name="entities-selector-entity"]:checked') : [];
+                  const currentChecked = new Set(Array.from(checkedInputs).map(inp => inp.value));
+                  const toRemove = [...initialChecked].filter(eid => !currentChecked.has(eid));
+                  const toAdd = [...currentChecked].filter(eid => !initialChecked.has(eid));
+                  for (const entityId of toRemove) {
+                    const itemId = initialIds[entityId];
+                    if (itemId) await this._deleteItem(itemId);
+                  }
+                  const timeHours = itemEl.querySelector('[data-slot-form="time-hours"]');
+                  const timeMinutes = itemEl.querySelector('[data-slot-form="time-minutes"]');
+                  const time = (timeHours && timeMinutes) ? `${timeHours.value}:${timeMinutes.value}` : item.time;
+                  const selectedWeekdays = WeekdaySelector.getSelectedWeekdays(itemEl);
+                  const weekdays = selectedWeekdays.length > 0 ? selectedWeekdays : item.weekdays;
+                  const hvacSelect = itemEl.querySelector('[data-slot-form="mode"]');
+                  const fanSelect = itemEl.querySelector('[data-slot-form="fan"]');
+                  const tempInput = itemEl.querySelector('[data-slot-form="temp"]');
+                  const hvacMode = hvacSelect && hvacSelect.value ? hvacSelect.value : (item.service_start?.value?.hvac_mode || 'heat');
+                  const fanMode = fanSelect?.value || undefined;
+                  let temperature = undefined;
+                  if (tempInput && tempInput.value !== '' && !Number.isNaN(Number(tempInput.value))) {
+                    temperature = parseFloat(tempInput.value);
+                  }
+                  let durationHours = null;
+                  if (hvacMode !== 'off' && window.DurationSelector) {
+                    const wrapper = itemEl.querySelector('.duration-selector-wrapper');
+                    if (wrapper) durationHours = DurationSelector.getSelectedDuration(itemEl);
+                  }
+                  const durationMins = (ScheduleHelper && ScheduleHelper.durationHoursToMinutes) ? ScheduleHelper.durationHoursToMinutes(durationHours) : (durationHours != null ? Math.round(Number(durationHours) * 60) : null);
+                  for (const entityId of toAdd) {
+                    const service_start = ScheduleHelper.createClimateServices(entityId, hvacMode, { temperature, fan_mode: fanMode }).service_start;
+                    const service_end = (hvacMode !== 'off' && durationMins) ? ScheduleHelper.createClimateServices(entityId, hvacMode).service_end : null;
+                    await ScheduleHelper.addScheduleSlot({
+                      hass: this._hass,
+                      callService: async (service, data) => this._callService(service, data),
+                      getBridgeState: () => this._getBridgeState(),
+                      entity_id: entityId,
+                      time,
+                      duration: durationMins || undefined,
+                      weekdays,
+                      service_start,
+                      service_end,
+                      bridgeSensor: this._bridgeSensor,
+                      onRender: () => {}
+                    });
+                  }
+                  if (toAdd.length > 0 || toRemove.length > 0) {
+                    this._optimisticBridgeState = null;
+                    this.hass = { ...this._hass };
+                    await this.render();
+                  }
                 };
-                setTimeout(() => document.addEventListener('click', close), 0);
+                setTimeout(() => document.addEventListener('mousedown', close), 0);
               }
             });
           }
@@ -3143,13 +3442,17 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
               if (!listEl) return;
               const inputs = listEl.querySelectorAll('input[name="entities-selector-entity"]:not(:disabled)');
               inputs.forEach(inp => { inp.checked = selectAllInput.checked; });
-              this._updateSlotEntitiesChips(slotEntitiesWrap);
+              this._updateEntityChipsForWrap(slotEntitiesWrap, { updateSlotTitle: true });
+              this._updateModeOptionsForWrap(slotEntitiesWrap, slotHvacSelect);
+              this._updateModeWarningForWrap(slotEntitiesWrap, slotHvacSelect, null);
             });
           }
           const listElForSync = slotEntitiesWrap.querySelector('.entities-selector-list');
           if (listElForSync && selectAllInput) {
             listElForSync.addEventListener('change', () => {
-              this._updateSlotEntitiesChips(slotEntitiesWrap);
+              this._updateEntityChipsForWrap(slotEntitiesWrap, { updateSlotTitle: true });
+              this._updateModeOptionsForWrap(slotEntitiesWrap, slotHvacSelect);
+              this._updateModeWarningForWrap(slotEntitiesWrap, slotHvacSelect, null);
               const all = listElForSync.querySelectorAll('input[name="entities-selector-entity"]:not(:disabled)');
               const checkedCount = Array.from(all).filter(inp => inp.checked).length;
               selectAllInput.checked = checkedCount === all.length;
@@ -3171,36 +3474,16 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       
       // In slots, weekday selector is directly in itemEl, not in .popup-field
       if (modeBtnsBefore.length > 0 || weekdayBtnsBefore.length > 0) {
-        // Function to update weekdays
         const updateWeekdays = () => {
-          if (itemEl.dataset.updating === 'true') {
-            return;
-          }
-          
-          const currentItems = this._getItems();
-          const currentItem = currentItems.find(i => i.id === itemId);
-          if (!currentItem) {
-            return;
-          }
-          
-          // Query weekday selector state
+          if (itemEl.dataset.updating === 'true') return;
           const selectedWeekdays = WeekdaySelector.getSelectedWeekdays(itemEl);
-          
           if (selectedWeekdays.length === 0) {
-            // Don't allow empty weekdays - restore previous state
-            WeekdaySelector.setSelectedWeekdays(this.shadowRoot, currentItem.weekdays, itemEl);
+            const currentItems = this._getItems();
+            const currentItem = currentItems.find(i => i.id === itemId);
+            if (currentItem) WeekdaySelector.setSelectedWeekdays(this.shadowRoot, currentItem.weekdays, itemEl);
             return;
           }
-          
-          // Only update if weekdays actually changed
-          const currentWeekdaysSorted = (currentItem.weekdays || []).slice().sort();
-          const selectedWeekdaysSorted = selectedWeekdays.slice().sort();
-          const weekdaysChanged = JSON.stringify(selectedWeekdaysSorted) !== JSON.stringify(currentWeekdaysSorted);
-          
-          if (weekdaysChanged) {
-            this._updateItem(itemId, { weekdays: selectedWeekdays });
-          } else {
-          }
+          this._updateItem(itemId, { weekdays: selectedWeekdays });
         };
         
         // Attach shared component listeners (handles mode switch + show/hide custom weekdays)
@@ -3225,12 +3508,13 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
                     const currentItem = currentItems.find(i => i.id === itemId);
                     if (currentItem && currentItem.weekdays) {
                       slotCard.querySelectorAll('.popup-weekday').forEach(dayEl => {
-                        const day = parseInt(dayEl.dataset.day);
-                        dayEl.classList.toggle('active', currentItem.weekdays.includes(day));
+                        const day = parseInt(dayEl.dataset.day, 10);
+                        dayEl.classList.toggle('active', !Number.isNaN(day) && currentItem.weekdays.includes(day));
                       });
                     }
                   }
                 });
+                return;
               }
               setTimeout(updateWeekdays, 100);
             });
@@ -3260,12 +3544,11 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     // Card disconnected from DOM - cleanup subscriptions
     if (this._unsubStateChanged) {
       try {
-        // Check if it's a function before calling
         if (typeof this._unsubStateChanged === 'function') {
           this._unsubStateChanged();
-        } else {
         }
       } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (climate): unsubscribe in disconnectedCallback failed', e);
       }
       this._unsubStateChanged = null;
     }

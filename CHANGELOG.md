@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0]
+
+### Climate cards
+
+- A unique interface for add/edit slot was added, including modes, temperature, duration in hours, and entity list.
+
+### Errors and notifications
+
+- Error alerts are no longer shown as popups; failures are reported quietly in the browser console so the UI stays calm while still allowing debugging.
+
+### Under the hood
+
+- Safer handling of user and integration data in the UI (no script injection from messages or fan options). More robust parsing of numbers and duration across climate and boiler cards; internal errors are logged instead of ignored.
+
 ## [1.0.6]
 
 ### Status

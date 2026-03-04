@@ -64,8 +64,8 @@ if (typeof window.WeekdaySelector === 'undefined') {
       day.classList.remove('active');
     });
 
-    // Hide custom weekdays selector (everyday is default)
-    const customWeekdays = shadowRoot.getElementById('popup-weekdays-custom');
+    // Hide custom weekdays selector (everyday is default); use querySelector so scope can be shadowRoot or a container (e.g. add popup form)
+    const customWeekdays = shadowRoot.querySelector ? shadowRoot.querySelector('#popup-weekdays-custom') : (shadowRoot.getElementById ? shadowRoot.getElementById('popup-weekdays-custom') : null);
     if (customWeekdays) customWeekdays.classList.add('hidden');
   }
 

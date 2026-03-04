@@ -50,6 +50,8 @@ let htmlTemplate = fs.readFileSync('card-template.html', 'utf8');
 // Automatically scan shared/ directory for components (JS and HTML only; CSS is in each card)
 const sharedBase = '../../shared';
 let sharedJs = '';
+const outputFile = process.env.OUTPUT_FILE || '';
+const durationVariant = outputFile.includes('climate') ? 'hours' : 'mins';
 
 if (fs.existsSync(sharedBase)) {
   const sharedDirs = fs.readdirSync(sharedBase, { withFileTypes: true })
@@ -57,9 +59,15 @@ if (fs.existsSync(sharedBase)) {
     .map(dirent => dirent.name);
   
   for (const dir of sharedDirs) {
-    const dirPath = path.join(sharedBase, dir);
-    const files = fs.readdirSync(dirPath);
+    let dirPath = path.join(sharedBase, dir);
+    // selector-duration: include mins (boiler) or hours (climate) subfolder only
+    if (dir === 'selector-duration') {
+      dirPath = path.join(sharedBase, dir, durationVariant);
+      if (!fs.existsSync(dirPath)) continue;
+    }
+    const files = fs.existsSync(dirPath) ? fs.readdirSync(dirPath) : [];
     
+    const displayDir = dir === 'selector-duration' ? `selector-duration/${durationVariant}` : dir;
     // Include .js files only
     const jsFiles = files.filter(f => f.endsWith('.js'));
     for (const jsFile of jsFiles) {
@@ -71,8 +79,8 @@ if (fs.existsSync(sharedBase)) {
       jsContent = jsContent.replace(/^export \{ [^}]+ \};?\s*$/gm, '');
       jsContent = jsContent.replace(/^\s*\{ [^}]+ \};?\s*$/gm, '');
       const inlinedJs = jsContent.trim();
-      sharedJs += `// Shared component: ${dir}/${jsFile}\n${inlinedJs}\n\n`;
-      console.log(`✓ Included shared/${dir}/${jsFile}`);
+      sharedJs += `// Shared component: ${displayDir}/${jsFile}\n${inlinedJs}\n\n`;
+      console.log(`✓ Included shared/${displayDir}/${jsFile}`);
     }
     
     // Include .html files (for template replacement)
@@ -80,32 +88,54 @@ if (fs.existsSync(sharedBase)) {
     for (const htmlFile of htmlFiles) {
       const htmlPath = path.join(dirPath, htmlFile);
       const htmlContent = fs.readFileSync(htmlPath, 'utf8');
-      // Use filename without extension as marker name (e.g., 'duration-selector' or 'weekday-selector')
       const markerName = htmlFile.replace('.html', '');
-      
-      // Replace section in main template using markers
-      // Format: <!-- SHARED:marker-name --> ... <!-- END:marker-name -->
       const markerStart = `<!-- SHARED:${markerName} -->`;
       const markerEnd = `<!-- END:${markerName} -->`;
-      
-      // Replace ALL occurrences of the marker (for both popup and slot templates)
-      // Use regex with global flag to replace all occurrences at once
       const markerRegex = new RegExp(
         markerStart.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]*?' + markerEnd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
         'g'
       );
       const matches = htmlTemplate.match(markerRegex);
       const replacementCount = matches ? matches.length : 0;
-      
       if (replacementCount > 0) {
         htmlTemplate = htmlTemplate.replace(markerRegex, markerStart + '\n' + htmlContent.trim() + '\n' + markerEnd);
-        console.log(`✓ Replaced shared/${dir}/${htmlFile} in template (${replacementCount} occurrence(s))`);
+        console.log(`✓ Replaced shared/${displayDir}/${htmlFile} in template (${replacementCount} occurrence(s))`);
       }
     }
   }
 }
 
-// Escape CSS for JavaScript (card-styles.css only; shared CSS is in card files)
+// shared/climate/: climate-only fragments (slot-form-fields), replaced when template has the marker
+const climateFragmentsBase = path.join(sharedBase, 'climate', 'slot-form-fields');
+if (fs.existsSync(climateFragmentsBase)) {
+  const htmlFiles = fs.readdirSync(climateFragmentsBase).filter(f => f.endsWith('.html'));
+  for (const htmlFile of htmlFiles) {
+    const htmlPath = path.join(climateFragmentsBase, htmlFile);
+    const htmlContent = fs.readFileSync(htmlPath, 'utf8');
+    const markerName = htmlFile.replace('.html', '');
+    const markerStart = `<!-- SHARED:${markerName} -->`;
+    const markerEnd = `<!-- END:${markerName} -->`;
+    const markerRegex = new RegExp(
+      markerStart.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]*?' + markerEnd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+      'g'
+    );
+    const matches = htmlTemplate.match(markerRegex);
+    const replacementCount = matches ? matches.length : 0;
+    if (replacementCount > 0) {
+      htmlTemplate = htmlTemplate.replace(markerRegex, markerStart + '\n' + htmlContent.trim() + '\n' + markerEnd);
+      console.log(`✓ Replaced shared/climate/slot-form-fields/${htmlFile} in template (${replacementCount} occurrence(s))`);
+    }
+  }
+  // Prepend shared slot-form-fields CSS when building a card that uses the fragment
+  const slotFormFieldsCssPath = path.join(climateFragmentsBase, 'slot-form-fields.css');
+  if (fs.existsSync(slotFormFieldsCssPath)) {
+    const sharedFormCss = fs.readFileSync(slotFormFieldsCssPath, 'utf8');
+    cssContent = sharedFormCss + '\n' + cssContent;
+    console.log('✓ Prepended shared/climate/slot-form-fields/slot-form-fields.css');
+  }
+}
+
+// Escape CSS for JavaScript (card-styles.css + optional shared form CSS)
 const cssEscaped = cssContent
     .replace(/\\/g, '\\\\')
     .replace(/`/g, '\\`')
@@ -187,7 +217,6 @@ if (loadTemplateMatch) {
 }
 
 // Add header: card name, last build, version (from CHANGELOG or env)
-const outputFile = process.env.OUTPUT_FILE;
 let cardName = 'Homie Schedule Card';
 if (outputFile) {
   const nameParts = outputFile.replace('.js', '').split('-');

@@ -245,6 +245,17 @@
 }
 .popup-close ha-icon { --mdc-icon-size: 24px; }
 .popup-body { padding: var(--ha-card-header-padding, 20px); }
+.popup-error {
+  color: var(--error-color, #b00020);
+  font-size: 13px;
+  margin-bottom: 12px;
+  display: block;
+}
+.slot-error-message {
+  color: var(--error-color, #b00020);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
 .popup-field { margin-bottom: 20px; }
 .popup-field:last-child { margin-bottom: 0; }
 .popup-field label {

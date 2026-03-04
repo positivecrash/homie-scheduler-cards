@@ -9,7 +9,7 @@ Lovelace cards for schedule management in Home Assistant. Set up in one click wh
 - **Boiler slots** – add/edit schedule slots for boiler/switch (time, duration, weekdays)
 - **Boiler button** – one-click run for X minutes or recirculation mode
 - **Boiler status** – icon toggle, status text, latest activity info, optional auto turn-off
-- **Climate slots** – schedule slots for climate entities (presets, time, weekdays) *(testing for now)*
+- **Climate slots** – schedule slots for climate entities (presets, time, weekdays)
 
 ## Requirements
 
@@ -25,6 +25,8 @@ You can build the dashboard you prefer with customizable separate cards. See how
 
 ## Water Heater cards features
 
+In the integration settings you can set a maximum run time per entity; it applies whenever the device is on and Home Assistant is running, regardless of how the device was turned on (schedule, button, or manually).
+
 ### Boiler status
 
 ![Boiler status](https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-status.png)
@@ -38,7 +40,6 @@ You can build the dashboard you prefer with customizable separate cards. See how
 
 ### Boiler schedule slots
 
-
 ![Boiler schedule slots](https://github.com/positivecrash/homie-scheduler-cards/raw/main/docs/images/homie-scheduler-boiler-slots.png)
 
 Runs the boiler on a schedule without creating automations one by one: change times and weekdays, enable or disable slots, and set clear names—all from the card. For how the schedule is stored and enforced, see the [integration README](https://github.com/positivecrash/homie-scheduler-integration).
@@ -49,6 +50,13 @@ Runs the boiler on a schedule without creating automations one by one: change ti
 
 Set fixed run durations in the card. Configure your own set of duration buttons.
 
+## Climate cards features
+
+These cards are for the climate domain. Typically they target devices such as air conditioners and underfloor heating thermostats. In the integration settings you can set a maximum run time per entity; it applies whenever the device is on and Home Assistant is running, regardless of how the device was turned on (schedule, button, or manually).
+
+### Climate schedule slots
+
+Schedule climate entities (HVAC mode, temperature, fan, optional duration in hours) by adding and editing slots: set time, weekdays, and optionally which entities the slot applies to.
 
 ## Manual installation
 
@@ -137,9 +145,6 @@ title: Boiler  # Optional: custom title (falls back to friendly_name or entity_i
 type: custom:homie-scheduler-climate-slots
 entity: climate.ac
 title: AC Schedule
-# Optional: duration configuration (duration is optional for climate)
-duration_range: [15, 1440]  # [min, max] in minutes (default: [15, 1440])
-duration_step: 15            # Step in minutes (default: 15)
 ```
 
 ---

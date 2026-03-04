@@ -8,6 +8,18 @@
  * 
  * ⚠️ For production run: bash build.sh
  * This will create homie-schedule-slots.js with embedded styles
+ *
+ * --- ALGORITHM (slots card) ---
+ * 1. Data: one entity, bridge sensor. Shows schedule slots (items) for this entity from bridge.
+ * 2. Slots come from bridge attributes.items, filtered by entity_id. No link to status or button cards.
+ * 3. Max duration for a slot: min(card max_duration, integration entity_max_runtime for this entity)
+ *    when integration has it set; otherwise card max_duration only.
+ * 4. Add slot: popup with time, weekdays, duration; calls homie_scheduler add_schedule_item (or
+ *    helper that updates items). Optimistic UI: show new slot until bridge confirms.
+ * 5. Edit/delete slot: update_item/delete_item via integration; _syncAllCardsForEntity updates
+ *    only this card's slot DOM (and shared duration selector in slots), not status or button.
+ * 6. Next run text: from bridge entity_next_runs or computed from items for this entity.
+ * 7. Scheduler on/off: switch.homie_scheduler_enabled; card reflects enabled state.
  */
 
 const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
@@ -113,41 +125,31 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     return null;
   }
 
+  /** Normalize duration_range / min_duration / max_duration / duration_step from raw config object. */
+  _normalizeDurationConfig(cfg) {
+    if (cfg?.duration_range && Array.isArray(cfg.duration_range) && cfg.duration_range.length === 2) {
+      cfg.min_duration = cfg.duration_range[0];
+      cfg.max_duration = cfg.duration_range[1];
+    } else {
+      cfg.min_duration = cfg.min_duration || 15;
+      cfg.max_duration = cfg.max_duration || 1440;
+    }
+    cfg.duration_step = cfg.duration_step || 15;
+  }
+
   setConfig(config) {
     try {
-      // Don't throw error - just show warning in UI
       if (!config || !config.entity) {
-        this._config = { 
-          entity: null, 
-          title: config?.title || 'Water Heater Schedule',
-        };
-        // Delay error display until shadowRoot is ready
+        this._config = { entity: null, title: config?.title || 'Water Heater Schedule' };
         if (this.shadowRoot) {
           this._showError('Please configure entity in card settings');
         } else {
-          // If shadowRoot not ready, will show error in render()
           this._configError = 'Please configure entity in card settings';
         }
         return;
       }
-      // Set config
-      this._config = {
-        ...config
-      };
-      
-      // Normalize duration configuration
-      // Support both duration_range: [min, max] and separate min_duration/max_duration
-      if (config.duration_range && Array.isArray(config.duration_range) && config.duration_range.length === 2) {
-        this._config.min_duration = config.duration_range[0];
-        this._config.max_duration = config.duration_range[1];
-      } else {
-        // Fallback to defaults if not specified
-        this._config.min_duration = config.min_duration || 15;
-        this._config.max_duration = config.max_duration || 1440;
-      }
-      // duration_step fallback
-      this._config.duration_step = config.duration_step || 15;
-      
+      this._config = { ...config };
+      this._normalizeDurationConfig(this._config);
       this._configError = null;
       if (this._hass && this.shadowRoot) {
         this.render().catch(err => {});
@@ -155,15 +157,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     } catch (err) {
       // Never throw from setConfig - it breaks the editor
       this._config = config || {};
-      // Duration configuration defaults with fallback
-      if (config?.duration_range && Array.isArray(config.duration_range) && config.duration_range.length === 2) {
-        this._config.min_duration = config.duration_range[0];
-        this._config.max_duration = config.duration_range[1];
-      } else {
-        this._config.min_duration = this._config.min_duration || 15;
-        this._config.max_duration = this._config.max_duration || 1440;
-      }
-      this._config.duration_step = this._config.duration_step || 15;
+      this._normalizeDurationConfig(this._config);
       this._configError = 'Configuration error';
       if (this.shadowRoot) {
         this._showError('Configuration error. Please check card settings.');
@@ -236,26 +230,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
                 // Poll to clear optimistic when real slot appears (don't force-clear immediately)
                 const hadTemp = this._optimisticBridgeState?.attributes?.items?.some(i => i?.id?.startsWith?.('temp-'));
                 if (hadTemp) {
-                  let attempts = 0;
-                  const pollClear = () => {
-                    if (!this._optimisticBridgeState?.attributes?.items?.some(i => i?.id?.startsWith?.('temp-'))) return;
-                    const fromHass = this._hass?.states?.[this._bridgeSensor]?.attributes?.items || [];
-                    const entityId = this._config?.entity;
-                    const tempItems = (this._optimisticBridgeState?.attributes?.items || []).filter(i => i?.id?.startsWith?.('temp-'));
-                    const realHasSame = tempItems.some(t => fromHass.some(h =>
-                      h?.entity_id === entityId && h?.time === t?.time &&
-                      JSON.stringify(h?.weekdays || []) === JSON.stringify(t?.weekdays || []) &&
-                      !String(h?.id || '').startsWith('temp-')));
-                    if (realHasSame) {
-                      this._optimisticBridgeState = null;
-                      this.hass = { ...this._hass };
-                      this.render().catch(() => {});
-                    } else if (attempts < 20) {
-                      attempts++;
-                      setTimeout(pollClear, 500);
-                    }
-                  };
-                  setTimeout(pollClear, 400);
+                  this._pollClearTempItems(20, 400);
                 } else {
                   this._optimisticBridgeState = null;
                   this.hass = { ...this._hass };
@@ -268,8 +243,10 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
             // Store the unsubscribe function once Promise resolves
             this._unsubStateChanged = unsubscribeFn;
           }).catch((e) => {
+            if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler): subscribeStateChanged failed', e);
           });
         } catch (e) {
+          if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler): subscribeStateChanged setup failed', e);
         }
       }
       
@@ -387,7 +364,9 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
         return;
       }
     
-    } catch (err) {}
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler): _resolveBridgeSensor failed', err);
+    }
   }
 
   _getBridgeState() {
@@ -399,15 +378,82 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     }
   }
 
-  /** Max duration for slots: capped by integration "Max run time" (entity_max_runtime) for this entity. */
+  /** Max duration for slots: card config capped by integration "Max run time" (entity_max_runtime) for this entity when set. */
   _getEffectiveMaxDuration() {
-    const configMax = this._config?.max_duration || 1440;
+    const configMax = this._config?.max_duration ?? 1440;
     const bridgeState = this._getBridgeState();
     const entityMaxRuntime = (bridgeState?.attributes?.entity_max_runtime || {})[this._config?.entity];
-    if (entityMaxRuntime > 0) {
-      return Math.min(configMax, entityMaxRuntime);
+    if (entityMaxRuntime != null && Number(entityMaxRuntime) > 0) {
+      return Math.min(configMax, Number(entityMaxRuntime));
     }
     return configMax;
+  }
+
+  /** Returns { minDuration, maxDuration, durationStep } for duration selector — single source of truth. */
+  _getDurationConfig() {
+    const minDuration = this._config?.min_duration || 15;
+    const maxDuration = this._getEffectiveMaxDuration();
+    const durationStep = window.DurationSelector?.computeStep?.(minDuration, maxDuration, this._config?.duration_step || 15)
+      ?? (this._config?.duration_step || 15);
+    return { minDuration, maxDuration, durationStep };
+  }
+
+  /** Apply a new items array as optimistic state and trigger UI sync across cards. */
+  _applyOptimisticItems(newItems) {
+    const bridgeState = this._getBridgeState();
+    if (!bridgeState) return;
+    this._optimisticBridgeState = { ...bridgeState, attributes: { ...bridgeState.attributes, items: newItems } };
+    this._updateHeaderStatus();
+    this.hass = { ...this._hass };
+    this._syncAllCardsForEntity(null, null, this._optimisticBridgeState);
+  }
+
+  /** Return new items array with `updates` applied to items whose id is in `targetIds`. */
+  _applyUpdatesToItems(items, targetIds, updates) {
+    return items.map(item => item && targetIds.includes(item.id) ? { ...item, ...updates } : item);
+  }
+
+  /** Request HA to refresh the bridge sensor. */
+  async _refreshBridgeSensor() {
+    if (!this._hass || !this._bridgeSensor) return;
+    try {
+      await this._hass.callService('homeassistant', 'update_entity', { entity_id: this._bridgeSensor });
+    } catch (e) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler): _refreshBridgeSensor failed', e);
+    }
+  }
+
+  /** Clear optimistic state and re-trigger hass after `delayMs`. */
+  _clearOptimisticAfter(delayMs = 100) {
+    setTimeout(() => {
+      if (!this._hass) return;
+      this._optimisticBridgeState = null;
+      this.hass = { ...this._hass };
+    }, delayMs);
+  }
+
+  /** Poll until temp items are replaced by real items from HA, then clear optimistic state. */
+  _pollClearTempItems(maxAttempts = 20, intervalMs = 500) {
+    let attempts = 0;
+    const poll = () => {
+      if (!this._optimisticBridgeState?.attributes?.items?.some(i => i?.id?.startsWith?.('temp-'))) return;
+      const fromHass = this._hass?.states?.[this._bridgeSensor]?.attributes?.items || [];
+      const entityId = this._config?.entity;
+      const tempItems = this._optimisticBridgeState.attributes.items.filter(i => i?.id?.startsWith?.('temp-'));
+      const realHasSame = tempItems.some(t => fromHass.some(h =>
+        h?.entity_id === entityId && h?.time === t?.time &&
+        JSON.stringify(h?.weekdays || []) === JSON.stringify(t?.weekdays || []) &&
+        !String(h?.id || '').startsWith('temp-')));
+      if (realHasSame) {
+        this._optimisticBridgeState = null;
+        this.hass = { ...this._hass };
+        this.render().catch(() => {});
+      } else if (attempts < maxAttempts) {
+        attempts++;
+        setTimeout(poll, intervalMs);
+      }
+    };
+    setTimeout(poll, intervalMs);
   }
 
   _getItems() {
@@ -428,30 +474,12 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
         if (!item || item.entity_id !== entityId) {
           return false;
         }
-        // Exclude temporary slots created by button (strict check)
         if (item.temporary === true) {
           return false;
         }
         return true;
       });
-      // Dedupe by (time, weekdays): when both temp and real slot exist, show only one (prefer real)
-      const byKey = new Map();
-      for (const item of filtered) {
-        const key = (item.time || '') + '|' + JSON.stringify(item.weekdays || []);
-        const existing = byKey.get(key);
-        const isTemp = item.id && String(item.id).startsWith('temp-');
-        if (!existing) {
-          byKey.set(key, item);
-        } else {
-          const existingIsTemp = existing.id && String(existing.id).startsWith('temp-');
-          if (isTemp && !existingIsTemp) {
-            // keep existing (real)
-          } else if (!isTemp && existingIsTemp) {
-            byKey.set(key, item);
-          }
-        }
-      }
-      return Array.from(byKey.values());
+      return filtered;
     } catch (err) {
       return [];
     }
@@ -542,6 +570,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       
       const hour = parseInt(timeMatch[1], 10);
       const minute = parseInt(timeMatch[2], 10);
+      if (Number.isNaN(hour) || Number.isNaN(minute)) return null;
       
       // Try next 8 days (today + 7 more days)
       for (let dayOffset = 0; dayOffset < 8; dayOffset++) {
@@ -642,9 +671,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     if (!this._entryId) {
       this._findBridgeSensor();
       if (!this._entryId) {
-        const msg = 'Homie Scheduler: bridge sensor not found. Check integration is installed and sensor "Scheduler Info" exists.';
-        console.warn(msg);
-        if (typeof alert === 'function') alert(msg);
+        console.warn('Homie Scheduler (boiler): bridge sensor not found. Check integration is installed and sensor "Scheduler Info" exists.');
         return Promise.resolve();
       }
     }
@@ -668,20 +695,14 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       
       // Check if it's a service not found error
       if (err.code === 3 || errorMsg.includes('not found') || errorMsg.includes('Unknown service')) {
-        alert('Integration service not available. Please check:\n1. Integration is installed\n2. Integration is enabled\n3. Home Assistant is restarted after integration installation');
+        console.warn('Homie Scheduler (boiler): Integration service not available.', err.message || err);
       } else {
-        // Extract user-friendly error message
         let userMsg = errorMsg;
-        // Remove technical details if present
-        if (userMsg.includes('for dictionary value')) {
-          userMsg = userMsg.split('for dictionary value')[0].trim();
-        }
-        // Remove old validation messages
+        if (userMsg.includes('for dictionary value')) userMsg = userMsg.split('for dictionary value')[0].trim();
         if (userMsg.includes('[30, 60]')) {
-          userMsg = userMsg.replace(/\[30, 60\]/g, '');
-          userMsg = userMsg.replace(/value must be one of/, 'Invalid duration value');
+          userMsg = userMsg.replace(/\[30, 60\]/g, '').replace(/value must be one of/, 'Invalid duration value');
         }
-        alert(`Error: ${userMsg}`);
+        console.warn('Homie Scheduler (boiler):', userMsg, err);
       }
     }
   }
@@ -695,91 +716,58 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
 
   async _toggleEnabled() {
     const items = this._getItems();
-    if (items.length === 0) {
-      this._openAddPopup();
-      return;
-    }
-    // If scheduler switch is off: enable only this card's slots, then turn on the switch
-    if (!this._isSchedulerEnabled() && this._hass) {
-      const bridgeState = this._hass.states[this._bridgeSensor];
-      if (this._bridgeSensor && bridgeState?.attributes?.items) {
-        const allItems = [...bridgeState.attributes.items];
-        items.forEach(item => {
-          if (item?.id) {
-            const idx = allItems.findIndex(i => i && i.id === item.id);
-            if (idx !== -1) {
-              const updated = { ...allItems[idx], enabled: true };
-              allItems[idx] = updated;
-              this._updateSlotElement(item.id, updated);
-            }
-          }
-        });
-        this._optimisticBridgeState = { ...bridgeState, attributes: { ...bridgeState.attributes, items: allItems } };
-        this._updateHeaderStatus();
-        this.hass = { ...this._hass };
-        this._syncAllCardsForEntity(null, null, this._optimisticBridgeState);
-      }
-      for (const item of items) {
-        if (item?.id) await this._callService('update_item', { id: item.id, enabled: true });
-      }
-      if (this._bridgeSensor) {
-        try {
-          await this._hass.callService('homeassistant', 'update_entity', { entity_id: this._bridgeSensor });
-        } catch (e) {}
-      }
+    if (items.length === 0) { this._openAddPopup(); return; }
+
+    const bridgeState = this._getBridgeState();
+    const allItems = bridgeState?.attributes?.items;
+    if (!allItems) return;
+
+    const itemIds = items.map(i => i?.id).filter(Boolean);
+
+    if (!this._isSchedulerEnabled()) {
+      // Scheduler off: enable all slots for this entity, then turn on the scheduler switch
+      this._applyOptimisticItems(this._applyUpdatesToItems(allItems, itemIds, { enabled: true }));
+      for (const item of items) if (item?.id) await this._callService('update_item', { id: item.id, enabled: true });
+      await this._refreshBridgeSensor();
       try {
         await this._hass.callService('switch', 'turn_on', { entity_id: SCHEDULER_SWITCH_ENTITY });
       } catch (e) {
         console.warn('Homie Scheduler: failed to turn on scheduler switch', e);
       }
-      setTimeout(() => { if (this._hass) this.hass = { ...this._hass }; }, 300);
+      this._clearOptimisticAfter(300);
       return;
     }
-    // Switch is on: toggle all slots for this card (on↔off)
-    const hasEnabledSlots = items.some(item => item && item.enabled === true);
-    const newEnabledState = !hasEnabledSlots;
 
-    if (this._hass && this._bridgeSensor) {
-      const bridgeState = this._hass.states[this._bridgeSensor];
-      if (bridgeState?.attributes?.items) {
-        const allItems = [...bridgeState.attributes.items];
-        items.forEach(item => {
-          if (item && item.id) {
-            const idx = allItems.findIndex(i => i && i.id === item.id);
-            if (idx !== -1) {
-              const updated = { ...allItems[idx], enabled: newEnabledState };
-              allItems[idx] = updated;
-              this._updateSlotElement(item.id, updated);
-            }
-          }
-        });
-        this._optimisticBridgeState = {
-          ...bridgeState,
-          attributes: { ...bridgeState.attributes, items: allItems }
-        };
-        this._updateHeaderStatus();
-        this.hass = { ...this._hass };
-        this._syncAllCardsForEntity(null, null, this._optimisticBridgeState);
-      }
-    }
+    // Scheduler on: toggle all slots on↔off
+    const newEnabled = !items.some(i => i?.enabled);
+    this._applyOptimisticItems(this._applyUpdatesToItems(allItems, itemIds, { enabled: newEnabled }));
+    for (const item of items) if (item?.id) await this._callService('update_item', { id: item.id, enabled: newEnabled });
+    await this._refreshBridgeSensor();
+    this._clearOptimisticAfter(500);
+  }
 
-    for (const item of items) {
-      if (item?.id) {
-        await this._callService('update_item', { id: item.id, enabled: newEnabledState });
-      }
-    }
+  /** Full match of two items (excluding title): entity_id, time, weekdays, duration. */
+  _itemsFullMatch(a, b) {
+    if (!a || !b) return false;
+    if (a.entity_id !== b.entity_id) return false;
+    if ((a.time || '') !== (b.time || '')) return false;
+    if (JSON.stringify(a.weekdays || []) !== JSON.stringify(b.weekdays || [])) return false;
+    const parseDur = (v) => { const d = parseInt(v, 10); return (v != null && v !== '' && !Number.isNaN(d)) ? d : null; };
+    const durA = a.duration == null ? null : parseDur(a.duration);
+    const durB = b.duration == null ? null : parseDur(b.duration);
+    return durA === durB;
+  }
 
-    if (this._hass && this._bridgeSensor) {
-      try {
-        await this._hass.callService('homeassistant', 'update_entity', { entity_id: this._bridgeSensor });
-      } catch (e) {}
-      setTimeout(() => { if (this._hass) this.hass = { ...this._hass }; }, 500);
-    }
+  /** True if items contains an item (id !== excludeId) that fully matches candidate. */
+  _findDuplicateItem(items, candidate, excludeId) {
+    return items.some(i => i && i.id !== excludeId && i.temporary !== true && this._itemsFullMatch(i, candidate));
   }
 
   _openAddPopup() {
     const popup = this.shadowRoot.getElementById('add-popup');
     if (popup) {
+      const errEl = popup.querySelector('#add-popup-error');
+      if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
       popup.style.display = 'flex';
       // Reset form
       const hoursSelect = this.shadowRoot.getElementById('popup-time-hours');
@@ -799,8 +787,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       // Allowed values: 5, 10, 15, ... up to max, plus max if not multiple of 5 (e.g. 66, 63)
       const durationInput = popupDurationWrapper.querySelector('[data-action="update-duration"]');
       const durationSlider = popupDurationWrapper.querySelector('[data-action="update-duration-slider"]');
-      const minDuration = this._config.min_duration || 15;
-      const maxDuration = this._getEffectiveMaxDuration();
+      const { minDuration, maxDuration } = this._getDurationConfig();
       const allowedValues = window.DurationSelector && typeof window.DurationSelector.computeAllowedValues === 'function'
         ? window.DurationSelector.computeAllowedValues(minDuration, maxDuration, 5)
         : (() => { const a = []; for (let i = minDuration; i <= maxDuration; i += 5) a.push(i); if (a[a.length - 1] < maxDuration) a.push(maxDuration); return a; })();
@@ -860,11 +847,11 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     }
     
     if (!duration) {
-      alert('Please select a duration');
+      console.warn('Homie Scheduler (boiler): Please select a duration');
       return;
     }
     if (selectedDays.length === 0) {
-      alert('Please select at least one day');
+      console.warn('Homie Scheduler (boiler): Please select at least one day');
       return;
     }
 
@@ -874,9 +861,23 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     if (!this._config || !this._config.entity) {
       return;
     }
+
+    const entityId = this._config.entity;
+    const durationParsed = parseInt(duration, 10);
+    const durationNum = (duration != null && duration !== '' && !Number.isNaN(durationParsed)) ? durationParsed : (typeof duration === 'number' ? duration : null);
+    const bridgeState = this._getBridgeState();
+    const allItems = (bridgeState?.attributes?.items || []).filter(i => i && i.temporary !== true);
+    const candidate = { entity_id: entityId, time, weekdays: selectedDays, duration: durationNum };
+    if (this._findDuplicateItem(allItems, candidate, null)) {
+      const errEl = this.shadowRoot.getElementById('add-popup')?.querySelector('#add-popup-error');
+      if (errEl) {
+        errEl.textContent = 'A slot with the same time, days and duration already exists.';
+        errEl.style.display = 'block';
+      }
+      return;
+    }
     
-    // Use shared helper to add slot (complete workflow)
-    const switchServices = ScheduleHelper.createSwitchServices(this._config.entity);
+    const switchServices = ScheduleHelper.createSwitchServices(entityId);
     
     try {
       await ScheduleHelper.addScheduleSlot({
@@ -885,7 +886,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
           return await this._callService(service, data);
         },
         getBridgeState: () => this._getBridgeState(),
-        entity_id: this._config.entity,
+        entity_id: entityId,
         time: time,
         duration: duration,
         weekdays: selectedDays,
@@ -902,56 +903,35 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
 
       // Optimistic UI: show new slot immediately, clear when real appears (poll, don't force-clear)
       const bridgeState = this._getBridgeState();
-      if (bridgeState && bridgeState.attributes) {
+        if (bridgeState && bridgeState.attributes) {
         const currentItems = bridgeState.attributes.items || [];
         const alreadyHasSlot = currentItems.some(
-          (i) => i && i.entity_id === this._config.entity && i.time === time
+          (i) => i && i.entity_id === entityId && i.time === time
         );
         if (!alreadyHasSlot) {
           const newItem = {
             id: 'temp-' + Date.now(),
-            entity_id: this._config.entity,
+            entity_id: entityId,
             time,
-            duration: parseInt(duration, 10) || duration,
+            duration: (duration != null && duration !== '' && !Number.isNaN(parseInt(duration, 10))) ? (parseInt(duration, 10) || duration) : duration,
             weekdays: selectedDays,
             enabled: true,
             service_start: switchServices.service_start,
             service_end: switchServices.service_end
           };
           if (title) newItem.title = title;
-          const newItems = [...currentItems, newItem];
           this._optimisticBridgeState = {
             ...bridgeState,
-            attributes: { ...bridgeState.attributes, items: newItems }
+            attributes: { ...bridgeState.attributes, items: [...currentItems, newItem] }
           };
           this.hass = { ...this._hass };
           this._syncAllCardsForEntity(null, null, this._optimisticBridgeState);
           await this.render();
-          // Poll until real slot appears (don't force-clear so slot stays visible)
-          let attempts = 0;
-          const pollClear = () => {
-            if (!this._optimisticBridgeState?.attributes?.items?.some(i => i?.id?.startsWith?.('temp-'))) return;
-            const fromHass = this._hass?.states?.[this._bridgeSensor]?.attributes?.items || [];
-            const entityId = this._config?.entity;
-            const tempItems = (this._optimisticBridgeState?.attributes?.items || []).filter(i => i?.id?.startsWith?.('temp-'));
-            const realHasSame = tempItems.some(t => fromHass.some(h =>
-              h?.entity_id === entityId && h?.time === t?.time &&
-              JSON.stringify(h?.weekdays || []) === JSON.stringify(t?.weekdays || []) &&
-              !String(h?.id || '').startsWith('temp-')));
-            if (realHasSame) {
-              this._optimisticBridgeState = null;
-              this.hass = { ...this._hass };
-              this.render().catch(() => {});
-            } else if (attempts < 20) {
-              attempts++;
-              setTimeout(pollClear, 500);
-            }
-          };
-          setTimeout(pollClear, 500);
+          this._pollClearTempItems();
         }
       }
     } catch (err) {
-      alert('Failed to add slot: ' + (err.message || err));
+      console.warn('Homie Scheduler (boiler): Failed to add slot', err.message || err, err);
       return;
     }
 
@@ -959,12 +939,13 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
   }
 
   _formatTime(timeStr) {
-    // Convert 24h to 12h format for display
+    if (!timeStr || typeof timeStr !== 'string') return '';
     const [hours, minutes] = timeStr.split(':');
-    const h = parseInt(hours);
+    const h = parseInt(hours, 10);
+    if (Number.isNaN(h)) return timeStr;
     const ampm = h >= 12 ? 'PM' : 'AM';
     const h12 = h % 12 || 12;
-    return `${h12}:${minutes} ${ampm}`;
+    return `${h12}:${minutes || '00'} ${ampm}`;
   }
 
   async _addItem() {
@@ -1019,7 +1000,9 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
         clearInterval(this._secondsTimer);
         this._secondsTimer = null;
       }
-    } catch (err) {}
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler): _updateHeaderStatus failed', err);
+    }
   }
 
   _syncSlotsFromBridgeSensor() {
@@ -1047,7 +1030,9 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
       
       // Also update header status
       this._updateHeaderStatus();
-    } catch (err) {}
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler): _syncSlotsFromBridgeSensor failed', err);
+    }
   }
   
   _syncAllCardsForEntity(itemId = null, updatedItem = null, optimisticBridgeState = null) {
@@ -1122,7 +1107,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
 
     // Update time selects
     const [hours, minutes] = updatedItem.time.split(':');
-    const roundedMinutes = String(Math.round(parseInt(minutes || 0) / 5) * 5).padStart(2, '0');
+    const minsVal = parseInt(minutes, 10); const roundedMinutes = String((Number.isNaN(minsVal) ? 0 : Math.round(minsVal / 5) * 5)).padStart(2, '0');
     const hoursSelect = slotCard.querySelector('.slot-time-hours');
     const minutesSelect = slotCard.querySelector('.slot-time-minutes');
     if (hoursSelect && hoursSelect.value !== hours) {
@@ -1133,7 +1118,8 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     }
 
     // Update duration select (config with effective max for allowed values 5,10,...,max)
-    DurationSelector.setDurationInSlot(slotCard, updatedItem.duration, { ...this._config, max_duration: this._getEffectiveMaxDuration() });
+    const { maxDuration: effectiveMax } = this._getDurationConfig();
+    DurationSelector.setDurationInSlot(slotCard, updatedItem.duration, { ...this._config, max_duration: effectiveMax });
 
     // Update weekday selector state
     WeekdaySelector.setSelectedWeekdays(this.shadowRoot, updatedItem.weekdays, slotCard);
@@ -1159,104 +1145,58 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
   }
 
   async _updateItem(itemId, updates) {
-    // Optimistically update local data for immediate UI feedback (using overlay, no hass mutation)
-    if (this._hass && this._bridgeSensor) {
-      const bridgeState = this._getBridgeState();
-      if (bridgeState?.attributes?.items) {
-        const items = [...bridgeState.attributes.items];
-        const itemIndex = items.findIndex(item => item && item.id === itemId);
-        if (itemIndex !== -1) {
-          const updatedItem = { ...items[itemIndex], ...updates };
-          items[itemIndex] = updatedItem;
-          
-          this._optimisticBridgeState = {
-            ...bridgeState,
-            attributes: {
-              ...bridgeState.attributes,
-              items: items
-            }
-          };
-          
-          this._updateSlotElement(itemId, updatedItem);
-          this._updateHeaderStatus();
-          this.hass = { ...this._hass };
-          this._syncAllCardsForEntity(itemId, updatedItem, this._optimisticBridgeState);
+    const bridgeState = this._getBridgeState();
+    const slotCard = this.shadowRoot.querySelector(`.slot-card[data-item-id="${itemId}"]`);
+    const errEl = slotCard?.querySelector('[data-slot-error]');
+    if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+
+    const allItems = (bridgeState?.attributes?.items || []).filter(i => i && i.temporary !== true);
+    const currentItem = allItems.find(i => i.id === itemId);
+    if (currentItem && (updates.time !== undefined || updates.duration !== undefined || updates.weekdays !== undefined)) {
+      const wouldBe = { ...currentItem, ...updates };
+      if (updates.duration === null || updates.duration === undefined) {
+        delete wouldBe.duration;
+      } else {
+        const d = typeof updates.duration === 'number' ? updates.duration : parseInt(updates.duration, 10);
+        wouldBe.duration = (!Number.isNaN(d) && d >= 0) ? d : (currentItem.duration != null ? currentItem.duration : undefined);
+      }
+      if (this._findDuplicateItem(allItems, wouldBe, itemId)) {
+        if (errEl) {
+          errEl.textContent = 'A slot with the same time, days and duration already exists.';
+          errEl.style.display = 'block';
         }
+        return;
       }
     }
-    
-    try {
-      await this._callService('update_item', {
-        id: itemId,
-        ...updates
-      });
-    } catch (err) {
-      throw err;
+
+    // Optimistic update: immediately reflect changes in UI without waiting for backend
+    if (bridgeState?.attributes?.items) {
+      const newItems = bridgeState.attributes.items.map(i => i?.id === itemId ? { ...i, ...updates } : i);
+      const updatedItem = newItems.find(i => i?.id === itemId);
+      this._optimisticBridgeState = { ...bridgeState, attributes: { ...bridgeState.attributes, items: newItems } };
+      if (updatedItem) this._updateSlotElement(itemId, updatedItem);
+      this._updateHeaderStatus();
+      this.hass = { ...this._hass };
+      this._syncAllCardsForEntity(itemId, updatedItem, this._optimisticBridgeState);
     }
-    
-    // Request fresh state from server, clear optimistic overlay when real update arrives
-    if (this._hass && this._bridgeSensor) {
-      try {
-        await this._hass.callService('homeassistant', 'update_entity', {
-          entity_id: this._bridgeSensor
-        });
-      } catch (e) {
-      }
-      
-      setTimeout(() => {
-        if (this._hass) {
-          this._optimisticBridgeState = null;
-          this.hass = { ...this._hass };
-        }
-      }, 100);
-      
-      setTimeout(() => {
-        if (this._hass) {
-          this._optimisticBridgeState = null;
-          this.hass = { ...this._hass };
-        }
-      }, 500);
-    }
+
+    await this._callService('update_item', { id: itemId, ...updates });
+    await this._refreshBridgeSensor();
+    this._clearOptimisticAfter(100);
+    this._clearOptimisticAfter(500);
   }
 
   async _deleteItem(itemId) {
     await this._callService('delete_item', { id: itemId });
-    
-    // Force update after deleting item - request entity update and re-render
-    if (this._hass && this._bridgeSensor) {
-      // Request entity update from server
-      try {
-        await this._hass.callService('homeassistant', 'update_entity', {
-          entity_id: this._bridgeSensor
-        });
-      } catch (e) {
-      }
-      
-      // Wait for state to update from server, then trigger full re-render
-      setTimeout(async () => {
-        if (this._hass) {
-          // Request fresh state again
-          try {
-            await this._hass.callService('homeassistant', 'update_entity', {
-              entity_id: this._bridgeSensor
-            });
-          } catch (e) {
-          }
-          
-          // Trigger full re-render
-          setTimeout(() => {
-            if (this._hass) {
-              this._optimisticBridgeState = null;
-              this.hass = { ...this._hass };
-              this.render().catch(() => {});
-              setTimeout(() => {
-                this._syncAllCardsForEntity();
-              }, 100);
-            }
-          }, 200);
-        }
-      }, 500);
-    }
+    await this._refreshBridgeSensor();
+    // Wait for HA to propagate deletion, then force full re-render
+    setTimeout(async () => {
+      await this._refreshBridgeSensor();
+      this._optimisticBridgeState = null;
+      this.hass = { ...this._hass };
+      this.render().catch(() => {});
+      setTimeout(() => this._syncAllCardsForEntity(), 100);
+    }, 500);
   }
 
   _toggleWeekday(item, day) {
@@ -1342,13 +1282,9 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     }
     
     // Replace duration placeholders (step computed so slider can reach max)
-    const minDuration = this._config.min_duration || 15;
-    const maxDuration = this._getEffectiveMaxDuration();
-    const durationStep = window.DurationSelector && typeof window.DurationSelector.computeStep === 'function'
-      ? window.DurationSelector.computeStep(minDuration, maxDuration, this._config.duration_step || 15)
-      : (this._config.duration_step || 15);
+    const { minDuration, maxDuration, durationStep } = this._getDurationConfig();
     const defaultDuration = Math.min(minDuration, maxDuration);
-    
+
     let processedTemplate = template
       .replace(/\{\{DURATION_MIN\}\}/g, minDuration)
       .replace(/\{\{DURATION_MAX\}\}/g, maxDuration)
@@ -1410,7 +1346,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     
     // Prepare time placeholders
     const [hours, minutes] = item.time.split(':');
-    const roundedMinutes = String(Math.round(parseInt(minutes || 0) / 5) * 5).padStart(2, '0');
+    const minsVal = parseInt(minutes, 10); const roundedMinutes = String((Number.isNaN(minsVal) ? 0 : Math.round(minsVal / 5) * 5)).padStart(2, '0');
     const timeHoursPlaceholders = {};
     const timeMinutesPlaceholders = {};
     for (let i = 0; i < 24; i++) {
@@ -1423,11 +1359,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     }
 
     // Replace placeholders (step computed so slider can reach max)
-    const minDuration = this._config.min_duration || 15;
-    const maxDuration = this._getEffectiveMaxDuration();
-    const durationStep = window.DurationSelector && typeof window.DurationSelector.computeStep === 'function'
-      ? window.DurationSelector.computeStep(minDuration, maxDuration, this._config.duration_step || 15)
-      : (this._config.duration_step || 15);
+    const { minDuration, maxDuration, durationStep } = this._getDurationConfig();
     const durationValue = item.duration || minDuration;
     
     let result = template
@@ -1652,12 +1584,13 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
           e.stopPropagation();
         });
         const [, minutes] = item.time.split(':');
-        const roundedMinutes = String(Math.round(parseInt(minutes || 0) / 5) * 5).padStart(2, '0');
+        const minsVal = parseInt(minutes, 10); const roundedMinutes = String((Number.isNaN(minsVal) ? 0 : Math.round(minsVal / 5) * 5)).padStart(2, '0');
         newMinutesSelect.value = roundedMinutes;
       }
 
       // Update duration - use shared component (allowed values 5,10,...,max)
-      const durationConfig = { ...this._config, max_duration: this._getEffectiveMaxDuration() };
+      const { maxDuration: slotMax } = this._getDurationConfig();
+      const durationConfig = { ...this._config, max_duration: slotMax };
       DurationSelector.setDurationInSlot(itemEl, item.duration, durationConfig);
       DurationSelector.attachEventListenersInSlot(itemEl, (duration) => {
         if (itemEl.dataset.updating === 'true') return;
@@ -1761,8 +1694,8 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
                   if (currentItem && currentItem.weekdays) {
                     // Set active state for days that are in currentItem.weekdays
                     slotCard.querySelectorAll('.popup-weekday').forEach(dayEl => {
-                      const day = parseInt(dayEl.dataset.day);
-                      if (currentItem.weekdays.includes(day)) {
+                      const day = parseInt(dayEl.dataset.day, 10);
+                      if (!Number.isNaN(day) && currentItem.weekdays.includes(day)) {
                         dayEl.classList.add('active');
                       } else {
                         dayEl.classList.remove('active');
@@ -1824,12 +1757,11 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     // Card disconnected from DOM - cleanup subscriptions
     if (this._unsubStateChanged) {
       try {
-        // Check if it's a function before calling
         if (typeof this._unsubStateChanged === 'function') {
           this._unsubStateChanged();
-        } else {
         }
       } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler): unsubscribe in disconnectedCallback failed', e);
       }
       this._unsubStateChanged = null;
     }

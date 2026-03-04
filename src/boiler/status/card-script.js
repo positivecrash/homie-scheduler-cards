@@ -7,6 +7,19 @@
  * 
  * ⚠️ For production run: bash build.sh
  * This will create homie-scheduler-boiler-status.js with embedded styles
+ *
+ * --- ALGORITHM (status card) ---
+ * 1. Data: one entity (switch), bridge sensor (homie_scheduler). No link to button or slots cards.
+ * 2. Toggle (click): turn_on/turn_off the entity. Before turn_on we call clear_active_button so
+ *    no button-card timer is applied; only integration limit (entity_max_runtime for this entity) applies if set.
+ * 3. "Max run time" line: shown only if integration options have entity_max_runtime[this entity] > 0.
+ * 4. Subtitle "Will be off in X": if run was started by the button card (last_changed ≈ button start),
+ *    use button timer_end so status shows the same countdown. Otherwise only from integration (slot
+ *    end or entity_max_runtime). When user turned on via status we clear active_buttons so button timer is not used.
+ * 5. On entity on: we can restore a client-side turn-off timer from bridge active_buttons only for
+ *    display consistency; we do not use it for the subtitle countdown (see _getTurnOffTime).
+ * 6. Latest activity / Last run: from bridge entity_last_runs. We register this entity for last_run
+ *    so integration records turn-on/turn-off even when triggered from this card.
  */
 
 class HomieBoilerStatusCard extends HTMLElement {
@@ -125,14 +138,18 @@ class HomieBoilerStatusCard extends HTMLElement {
           ).then((unsubscribeFn) => {
             this._unsubStateChanged = unsubscribeFn;
           }).catch((e) => {
+            if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler status): subscribeStateChanged failed', e);
           });
         } catch (e) {
+          if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler status): subscribeStateChanged setup failed', e);
         }
       }
       
       // Re-render on state changes
       this.render().catch(err => {});
-    } catch (err) {}
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler status): hass setter failed', err);
+    }
   }
 
   get hass() {
@@ -328,6 +345,7 @@ class HomieBoilerStatusCard extends HTMLElement {
       try {
         this._unsubStateChanged();
       } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler status): unsubscribe in disconnectedCallback failed', e);
       }
       this._unsubStateChanged = null;
     }
@@ -383,7 +401,9 @@ class HomieBoilerStatusCard extends HTMLElement {
         this._entryId = firstBridgeSensor.entryId;
         return;
       }
-    } catch (err) {}
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) console.warn('Homie Scheduler (boiler status): _findBridgeSensor failed', err);
+    }
   }
 
   _getBridgeState() {
@@ -493,6 +513,7 @@ class HomieBoilerStatusCard extends HTMLElement {
     return candidates;
   }
 
+  /** Turn-off time for subtitle: (1) integration (slot end or entity_max_runtime) if present; (2) else if run started by button — button timer. */
   _getTurnOffTime() {
     try {
       const bridgeState = this._getBridgeState();
@@ -501,43 +522,43 @@ class HomieBoilerStatusCard extends HTMLElement {
       const entityId = this._config?.entity;
       if (!entityId) return null;
 
-      const activeButtons = bridgeState.attributes?.active_buttons || {};
-      const activeButton = activeButtons[entityId];
-
-      // Priority 1: active_buttons (from button card set_active_button)
-      if (activeButton && activeButton.timer_end) {
-        let timerEnd = parseInt(activeButton.timer_end, 10);
-        if (!isNaN(timerEnd)) {
-          if (timerEnd > 0 && timerEnd < 1e12) timerEnd *= 1000; // seconds → ms
-          const d = new Date(timerEnd);
-          if (d > new Date()) return d;
-        }
-      }
-
-      // Collect all valid turn-off times; boiler turns off at the earliest
+      const entityState = this._getEntityState();
       const now = new Date();
       const candidates = [];
 
-      // max_runtime_turn_off_times from ALL bridge sensors (multiple instances → take min)
+      // 1) Integration first: slot end or entity_max_runtime (so slot-driven runs show slot time, not button)
       const bridgeCandidates = this._getAllTurnOffCandidatesFromBridges();
       candidates.push(...bridgeCandidates);
 
-      // Fallback: entity.last_changed + max_runtime (only when integration hasn't provided turn-off time)
-      const hasTurnOffFromIntegration = candidates.length > 0;
-      if (!hasTurnOffFromIntegration) {
-        const entityMaxRuntime = bridgeState.attributes?.entity_max_runtime || {};
-        const maxMinutes = entityMaxRuntime[entityId];
-        if (maxMinutes != null && Number(maxMinutes) > 0) {
-          const entityState = this._getEntityState();
-          if (entityState && entityState.state === 'on' && entityState.last_changed) {
-            const lastChanged = new Date(entityState.last_changed).getTime();
-            const d = new Date(lastChanged + Number(maxMinutes) * 60 * 1000);
-            if (d > now) candidates.push(d.getTime());
+      if (candidates.length > 0) return new Date(Math.min(...candidates));
+
+      // 2) Fallback: entity_max_runtime for this entity only
+      const entityMaxRuntime = bridgeState.attributes?.entity_max_runtime || {};
+      const maxMinutes = entityMaxRuntime[entityId];
+      if (maxMinutes != null && Number(maxMinutes) > 0 && entityState?.state === 'on' && entityState.last_changed) {
+        const lastChanged = new Date(entityState.last_changed).getTime();
+        const d = new Date(lastChanged + Number(maxMinutes) * 60 * 1000);
+        if (d > now) return d;
+      }
+
+      // 3) If run was started by the button card — show button's timer
+      const activeButtons = bridgeState.attributes?.active_buttons || {};
+      const activeButton = activeButtons[entityId];
+      if (activeButton?.timer_end && entityState?.state === 'on' && entityState.last_changed) {
+        let timerEnd = parseInt(activeButton.timer_end, 10);
+        if (!isNaN(timerEnd)) {
+          if (timerEnd > 0 && timerEnd < 1e12) timerEnd *= 1000;
+          const durationMin = (activeButton.duration != null) ? Number(activeButton.duration) : 0;
+          if (durationMin > 0) {
+            const buttonStartMs = timerEnd - durationMin * 60 * 1000;
+            const lastChangedMs = new Date(entityState.last_changed).getTime();
+            if (lastChangedMs <= buttonStartMs + 5000) {
+              const d = new Date(timerEnd);
+              if (d > now) return d;
+            }
           }
         }
       }
-
-      if (candidates.length > 0) return new Date(Math.min(...candidates));
 
       return null;
     } catch (err) {
@@ -700,13 +721,16 @@ class HomieBoilerStatusCard extends HTMLElement {
     }
   }
 
-  _formatTimeUntil(date) {
+  /** @param {Date} date - target time
+   *  @param {number} [maxMs] - cap displayed countdown (e.g. entity_max_runtime) so it never exceeds limit when device clock is wrong */
+  _formatTimeUntil(date, maxMs) {
     if (!date) return '';
     
     try {
       const now = Date.now();
       const targetTime = date.getTime();
-      const diffMs = targetTime - now;
+      let diffMs = targetTime - now;
+      if (maxMs != null && maxMs > 0 && diffMs > maxMs) diffMs = maxMs;
       
       if (diffMs <= 0) return 'now';
       
@@ -752,13 +776,19 @@ class HomieBoilerStatusCard extends HTMLElement {
     
     // Entity is on (turn-off time from integration: slot duration, button, or max_runtime)
     if (turnOffTime) {
-      const timeUntil = this._formatTimeUntil(turnOffTime);
+      const bridgeState = this._getBridgeState();
+      const entityMaxRuntime = bridgeState?.attributes?.entity_max_runtime || {};
+      const maxMinutes = entityMaxRuntime[this._config?.entity];
+      const maxMs = (maxMinutes != null && Number(maxMinutes) > 0)
+        ? Number(maxMinutes) * 60 * 1000
+        : undefined;
+      const timeUntil = this._formatTimeUntil(turnOffTime, maxMs);
       // If time is in the past, bridge may not have updated yet — refresh to get new slot end
       if (timeUntil === 'now') {
         this._scheduleCountdownRefresh();
         return 'Runs, updating…';
       }
-      return `Runs, will be off in ${timeUntil}`;
+      return `Runs, Will be off in ${timeUntil}`;
     }
     
     // Entity is on but no turn-off time from integration
@@ -791,6 +821,10 @@ class HomieBoilerStatusCard extends HTMLElement {
     }
   }
 
+  /**
+   * Toggle (click on status icon): no max time is applied from button/slots cards.
+   * Only integration "Max run time" for this entity (if set in integration options) applies.
+   */
   async _toggleEntity() {
     if (!this._hass || !this._config || !this._config.entity) return;
     
@@ -798,28 +832,25 @@ class HomieBoilerStatusCard extends HTMLElement {
       const isOn = this._isEntityOn();
       
       if (isOn) {
-        // Turning off - clear any active timer
         if (this._turnOffTimer) {
           clearTimeout(this._turnOffTimer);
           this._turnOffTimer = null;
         }
-        
-        // Clear active button marker in integration
         if (this._entryId) {
           try {
-            await this._callService('clear_active_button', {
-              entity_id: this._config.entity
-            });
-          } catch (e) {
-            // Ignore errors
-          }
+            await this._callService('clear_active_button', { entity_id: this._config.entity });
+          } catch (e) { /* ignore */ }
         }
-        
         await this._hass.callService('switch', 'turn_off', {
           entity_id: this._config.entity
         });
       } else {
-        // Turning on – just turn on (turn-off is from button card duration or integration max_runtime)
+        // Turn on: clear button state so integration/slot controls turn-off (entity_max_runtime or slot)
+        if (this._entryId) {
+          try {
+            await this._callService('clear_active_button', { entity_id: this._config.entity });
+          } catch (e) { /* ignore */ }
+        }
         await this._hass.callService('switch', 'turn_on', {
           entity_id: this._config.entity
         });
@@ -835,7 +866,7 @@ class HomieBoilerStatusCard extends HTMLElement {
         }
       }, 100);
     } catch (err) {
-      alert('Failed to toggle switch: ' + (err.message || err));
+      console.warn('Homie Scheduler (boiler status): Failed to toggle switch', err.message || err, err);
     }
   }
 

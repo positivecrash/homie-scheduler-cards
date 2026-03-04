@@ -1,0 +1,150 @@
+<!-- Climate: form fields for Add Slot popup and Edit Slot (same structure, one source of truth) -->
+<div class="slot-form" data-slot-form="root">
+  <div class="slot-form-field" data-slot-form="field-title">
+    <label class="slot-form-label">
+      <ha-icon icon="mdi:label-outline"></ha-icon>
+      <span>Title (optional)</span>
+    </label>
+    <input type="text" class="homie-input slot-form-title-input" data-slot-form="title" data-item-id="{{ITEM_ID}}" value="{{SLOT_TITLE}}" placeholder="e.g. Morning heating">
+  </div>
+
+  <div class="slot-form-field" data-slot-form="field-time">
+    <label class="slot-form-label">
+      <ha-icon icon="mdi:clock-outline"></ha-icon>
+      <span>Start Time</span>
+    </label>
+    <div class="time-selects">
+      <select class="homie-select slot-form-time-hours" data-slot-form="time-hours" data-item-id="{{ITEM_ID}}">
+        <option value="00" {{TIME_HOURS_00}}>00</option>
+        <option value="01" {{TIME_HOURS_01}}>01</option>
+        <option value="02" {{TIME_HOURS_02}}>02</option>
+        <option value="03" {{TIME_HOURS_03}}>03</option>
+        <option value="04" {{TIME_HOURS_04}}>04</option>
+        <option value="05" {{TIME_HOURS_05}}>05</option>
+        <option value="06" {{TIME_HOURS_06}}>06</option>
+        <option value="07" {{TIME_HOURS_07}}>07</option>
+        <option value="08" {{TIME_HOURS_08}}>08</option>
+        <option value="09" {{TIME_HOURS_09}}>09</option>
+        <option value="10" {{TIME_HOURS_10}}>10</option>
+        <option value="11" {{TIME_HOURS_11}}>11</option>
+        <option value="12" {{TIME_HOURS_12}}>12</option>
+        <option value="13" {{TIME_HOURS_13}}>13</option>
+        <option value="14" {{TIME_HOURS_14}}>14</option>
+        <option value="15" {{TIME_HOURS_15}}>15</option>
+        <option value="16" {{TIME_HOURS_16}}>16</option>
+        <option value="17" {{TIME_HOURS_17}}>17</option>
+        <option value="18" {{TIME_HOURS_18}}>18</option>
+        <option value="19" {{TIME_HOURS_19}}>19</option>
+        <option value="20" {{TIME_HOURS_20}}>20</option>
+        <option value="21" {{TIME_HOURS_21}}>21</option>
+        <option value="22" {{TIME_HOURS_22}}>22</option>
+        <option value="23" {{TIME_HOURS_23}}>23</option>
+      </select>
+      <span class="time-separator">:</span>
+      <select class="homie-select slot-form-time-minutes" data-slot-form="time-minutes" data-item-id="{{ITEM_ID}}">
+        <option value="00" {{TIME_MINUTES_00}}>00</option>
+        <option value="05" {{TIME_MINUTES_05}}>05</option>
+        <option value="10" {{TIME_MINUTES_10}}>10</option>
+        <option value="15" {{TIME_MINUTES_15}}>15</option>
+        <option value="20" {{TIME_MINUTES_20}}>20</option>
+        <option value="25" {{TIME_MINUTES_25}}>25</option>
+        <option value="30" {{TIME_MINUTES_30}}>30</option>
+        <option value="35" {{TIME_MINUTES_35}}>35</option>
+        <option value="40" {{TIME_MINUTES_40}}>40</option>
+        <option value="45" {{TIME_MINUTES_45}}>45</option>
+        <option value="50" {{TIME_MINUTES_50}}>50</option>
+        <option value="55" {{TIME_MINUTES_55}}>55</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="slot-form-field slot-form-entities-wrap" data-slot-form="entities-wrap" style="display: none;">
+    <label class="slot-form-label">
+      <ha-icon icon="mdi:format-list-checks"></ha-icon>
+      <span>Apply to entities</span>
+    </label>
+    <div class="slot-form-entities-trigger" data-slot-form="entities-trigger" tabindex="0" role="combobox">
+      <div class="slot-form-entities-chips" data-slot-form="entities-chips"></div>
+      <ha-icon class="slot-form-entities-caret" icon="mdi:chevron-down"></ha-icon>
+    </div>
+    <div class="slot-form-entities-dropdown" data-slot-form="entities-dropdown">
+      <label class="slot-form-entity-row slot-form-entities-select-all-row">
+        <input type="checkbox" class="slot-form-entities-select-all" data-slot-form="entities-select-all">
+        <span class="slot-form-entity-name">Select all</span>
+      </label>
+      <div class="entities-selector-list"></div>
+      <template class="entities-selector-row-tpl">
+        <label class="entities-selector-row">
+          <input type="checkbox" name="entities-selector-entity" value="">
+          <span class="entities-selector-entity-name"></span>
+        </label>
+      </template>
+    </div>
+  </div>
+
+  <div class="slot-form-row slot-form-row-mode-fan-temp">
+    <div class="slot-form-field slot-form-field-mode" data-slot-form="field-mode">
+      <label class="slot-form-label">
+        <ha-icon icon="mdi:thermostat"></ha-icon>
+        <span>Mode</span>
+      </label>
+      <select class="homie-select slot-form-mode-select" data-slot-form="mode" data-action="update-hvac-mode" data-item-id="{{ITEM_ID}}">
+        {{HVAC_MODE_OPTIONS}}
+      </select>
+      <div class="slot-form-mode-warning" data-slot-form="mode-warning"></div>
+    </div>
+    <div class="slot-form-field slot-form-field-fan" data-slot-form="field-fan">
+      <label class="slot-form-label">
+        <ha-icon icon="mdi:fan"></ha-icon>
+        <span>Fan</span>
+      </label>
+      <select class="homie-select slot-form-fan-select" data-slot-form="fan" data-item-id="{{ITEM_ID}}">
+        {{FAN_OPTIONS}}
+      </select>
+    </div>
+    <div class="slot-form-field slot-form-field-temp" data-slot-form="field-temp">
+      <label class="slot-form-label">
+        <ha-icon icon="mdi:thermometer"></ha-icon>
+        <span>Temp °C</span>
+      </label>
+      <input type="number" class="homie-input slot-form-temp-input" data-slot-form="temp" data-item-id="{{ITEM_ID}}" min="{{TEMP_MIN}}" max="{{TEMP_MAX}}" step="0.5" value="{{TEMP_VALUE}}" placeholder="—">
+    </div>
+  </div>
+
+  <div class="slot-form-field" data-slot-form="field-duration">
+    <div class="slot-form-duration-row popup-field-row">
+      <label class="slot-form-field-row-label popup-field-row-label">
+        <ha-icon icon="mdi:timer-outline"></ha-icon>
+        <span>{{DURATION_LABEL}}</span>
+      </label>
+      <ha-switch class="slot-form-duration-enabled" data-slot-form="duration-enabled"></ha-switch>
+    </div>
+    <div class="slot-form-duration-wrapper" data-slot-form="duration-wrapper" style="display: none; margin-top: 8px;">
+      <div class="duration-selector-wrapper">
+        <input type="range" class="duration-slider" data-action="update-duration-slider" data-item-id="{{ITEM_ID}}" min="{{DURATION_MIN}}" max="{{DURATION_MAX}}" step="0.5" value="{{DURATION_VALUE}}" />
+        <input type="number" class="duration-input homie-input" data-action="update-duration" data-item-id="{{ITEM_ID}}" min="{{DURATION_MIN}}" max="{{DURATION_MAX}}" step="0.5" value="{{DURATION_VALUE}}" />
+      </div>
+    </div>
+  </div>
+
+  <div class="slot-form-field" data-slot-form="field-weekdays">
+    <label class="slot-form-label">
+      <ha-icon icon="mdi:calendar"></ha-icon>
+      <span>Days of Week</span>
+    </label>
+    <div class="weekday-mode-selector">
+      <button type="button" class="weekday-mode-btn active" data-mode="everyday">Everyday</button>
+      <button type="button" class="weekday-mode-btn" data-mode="weekdays">Weekdays</button>
+      <button type="button" class="weekday-mode-btn" data-mode="custom">Custom</button>
+    </div>
+    <div class="popup-weekdays hidden" id="popup-weekdays-custom">
+      <div class="popup-weekday" data-day="0">Mon</div>
+      <div class="popup-weekday" data-day="1">Tue</div>
+      <div class="popup-weekday" data-day="2">Wed</div>
+      <div class="popup-weekday" data-day="3">Thu</div>
+      <div class="popup-weekday" data-day="4">Fri</div>
+      <div class="popup-weekday" data-day="5">Sat</div>
+      <div class="popup-weekday" data-day="6">Sun</div>
+    </div>
+  </div>
+</div>
