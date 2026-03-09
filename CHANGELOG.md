@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.3]
+
+### Bundle
+
+- **Console:** Version is shown again in the browser console when cards register (e.g. "Homie Scheduler 1.1.3 · boiler-button-card"). Version is set at build time so it always matches the loaded bundle.
+
 ## [1.1.2]
 
 ### Climate slots

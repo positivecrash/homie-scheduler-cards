@@ -1,21 +1,23 @@
 /**
  * Homie Scheduler Cards - All-in-one bundle
- * Last build: 2026-03-06T15:15:51.828Z
- * Version: 1.1.1
+ * Last build: 2026-03-09T13:44:18.575Z
+ * Version: 1.1.3
  */
 
-
 const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.3';
+
 // Shared Components (auto-included from shared/)
 // Shared component: card-console-info/card-console-info.js
 /**
  * Shared console info for Homie Scheduler cards.
- * Logs branded card name. No version in resources to avoid cache sticking to old builds.
+ * Version comes from bundle (set at build time) so it matches the loaded script.
  */
 if (typeof window.logCardInfo === 'undefined') {
   window.logCardInfo = function (cardName) {
+    const v = typeof window.__HOMIE_SCHEDULER_CARDS_VERSION !== 'undefined' ? ' ' + window.__HOMIE_SCHEDULER_CARDS_VERSION : '';
     console.info(
-      '%c Homie Scheduler %c ' + cardName,
+      '%c Homie Scheduler' + v + ' %c ' + cardName,
       'color: white; background:rgb(94, 94, 243); font-weight: 700; padding 5px;',
       'color: rgb(94, 94, 243); background: white; font-weight: 700; padding 5px;'
     );

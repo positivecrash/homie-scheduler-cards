@@ -79,6 +79,7 @@ const header = `/**
  * Last build: ${new Date().toISOString()}
  * Version: ${version}
  */
+window.__HOMIE_SCHEDULER_CARDS_VERSION = '${version}';
 
 `;
 
