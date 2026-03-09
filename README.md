@@ -67,6 +67,20 @@ Schedule climate entities (HVAC mode, temperature, fan, optional duration in hou
 
    *Alternatively*, you can add each card file from `dist/` as a separate JavaScript Module instead of the bundle.
 
+### When HA runs in Docker
+
+The container usually mounts the config from a folder **other than** `~/.homeassistant` (e.g. `./config` next to `docker-compose.yml`). Deploy into that folder so the new files are actually served:
+
+```bash
+# Example: config is in ./config
+./deploy.sh ./config
+
+# Or deploy to both local and Docker config
+./deploy.sh ~/.homeassistant && ./deploy.sh /path/to/docker/config
+```
+
+After copying, restart the container or reload the frontend. In DevTools → Network, check that the loaded JS shows the latest "Last build" date.
+
 
 ---
 
@@ -145,6 +159,11 @@ title: Boiler  # Optional: custom title (falls back to friendly_name or entity_i
 type: custom:homie-scheduler-climate-slots
 entity: climate.ac
 title: AC Schedule
+# Optional: duration (hours) — same mechanism as boiler slots
+# duration_range: [0.5, 12]   # [min, max] in hours (default: [0.5, 12])
+# min_duration: 0.5
+# max_duration: 12
+# duration_step: 0.5
 ```
 
 ---

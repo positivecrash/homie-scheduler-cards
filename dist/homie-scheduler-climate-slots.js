@@ -1,27 +1,24 @@
 /**
  * Scheduler Climate Slots Card
- * Last build: 2026-03-04T20:10:24.477Z
+ * Last build: 2026-03-06T15:15:51.756Z
  * Version: 1.1.1
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.1';
 
 const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
+
+// Use hours duration selector (0.5–12 h, step 0.5). In bundle, boiler loads first and sets DurationSelector = mins; climate must use DurationSelectorHours.
+const DurationSelector = window.DurationSelectorHours || window.DurationSelector;
 
 // Shared Components (auto-included from shared/)
 // Shared component: card-console-info/card-console-info.js
 /**
  * Shared console info for Homie Scheduler cards.
- * Logs branded card name and release version (set at build time).
- * Uses window.logCardInfo so the bundle can include this file multiple times (one per card) without redeclaration error.
+ * Logs branded card name. No version in resources to avoid cache sticking to old builds.
  */
 if (typeof window.logCardInfo === 'undefined') {
   window.logCardInfo = function (cardName) {
-    var version = typeof window.__HOMIE_SCHEDULER_CARDS_VERSION !== 'undefined'
-      ? window.__HOMIE_SCHEDULER_CARDS_VERSION
-      : 'dev';
-    var label = cardName + ' v' + version;
     console.info(
-      '%c Homie Scheduler %c ' + label,
+      '%c Homie Scheduler %c ' + cardName,
       'color: white; background:rgb(94, 94, 243); font-weight: 700; padding 5px;',
       'color: rgb(94, 94, 243); background: white; font-weight: 700; padding 5px;'
     );
@@ -381,25 +378,227 @@ if (typeof window.ScheduleHelper === 'undefined') {
   // Already assigned to window.ScheduleHelper above, no need to reassign
 }
 
-// Shared component: selector-duration/hours/duration-selector.js
+// Shared component: selector-duration/selector-duration.js
 /**
- * Duration Selector (hours)
- * Slider + number input, duration in hours (0.5–12, step 0.5). Used by climate card.
- * Slider uses real hours (min 0.5, max 12) so thumb at start = 0.5 h, like boiler.
+ * Duration Selector — shared module.
+ * Two variants: DurationSelectorMins (boiler, minutes) and DurationSelectorHours (climate, hours).
+ * In bundle, boiler loads first and sets window.DurationSelector = Mins; climate uses window.DurationSelectorHours.
  */
+
+// --- Minutes variant (boiler: 15–1440 min, step 15) ---
+
+const DurationSelectorMins = class DurationSelector {
+  static computeStep(min, max, preferredStep = 15) {
+    const range = max - min;
+    if (range <= 0) return 1;
+    if (preferredStep >= range) return range;
+    const divisors = [];
+    for (let i = 1; i <= range; i++) {
+      if (range % i === 0) divisors.push(i);
+    }
+    if (divisors.length === 0) return 1;
+    let best = divisors[0];
+    for (let j = 0; j < divisors.length; j++) {
+      const d = divisors[j];
+      if (Math.abs(d - preferredStep) < Math.abs(best - preferredStep)) best = d;
+    }
+    return best;
+  }
+
+  static computeAllowedValues(min, max, stepBase = 5) {
+    if (max < min) return [min];
+    const list = [];
+    let v = Math.ceil(min / stepBase) * stepBase;
+    if (v > min) list.push(min);
+    while (v <= max) {
+      list.push(v);
+      v += stepBase;
+    }
+    if (list.length && list[list.length - 1] < max) list.push(max);
+    return list;
+  }
+
+  static getSelectedDuration(shadowRoot) {
+    let wrapper = null;
+    if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
+      wrapper = shadowRoot;
+    } else {
+      wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
+    }
+    if (wrapper) {
+      const input = wrapper.querySelector('[data-action="update-duration"]');
+      if (input) {
+        const value = input.value;
+        return value && value !== '' ? parseInt(value, 10) : null;
+      }
+    }
+    const input = shadowRoot.querySelector('[data-action="update-duration"]');
+    if (!input) return null;
+    const value = input.value;
+    return value && value !== '' ? parseInt(value, 10) : null;
+  }
+
+  static setSelectedDuration(shadowRoot, duration) {
+    const wrapper = shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')
+      ? shadowRoot
+      : shadowRoot.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || shadowRoot).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || shadowRoot).querySelector('[data-action="update-duration-slider"]');
+    if (input) {
+      input.value = duration != null && duration !== '' ? String(duration) : '';
+    }
+    if (slider) {
+      slider.value = duration != null && duration !== '' ? String(duration) : '';
+    }
+  }
+
+  static reset(shadowRoot, defaultDuration = 30) {
+    this.setSelectedDuration(shadowRoot, defaultDuration);
+  }
+
+  static attachEventListeners(shadowRoot) {
+    let wrapper = null;
+    if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
+      wrapper = shadowRoot;
+    } else {
+      wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
+    }
+    if (!wrapper) return;
+    const input = wrapper.querySelector('[data-action="update-duration"]');
+    const slider = wrapper.querySelector('[data-action="update-duration-slider"]');
+    if (!input || !slider) return;
+    const newInput = input.cloneNode(true);
+    const newSlider = slider.cloneNode(true);
+    input.parentNode.replaceChild(newInput, input);
+    slider.parentNode.replaceChild(newSlider, slider);
+    const minVal = parseInt(newInput.min, 10) || 0;
+    const maxVal = parseInt(newInput.max, 10) || 1440;
+    newSlider.min = minVal;
+    newSlider.max = maxVal;
+    let currentValue = parseInt(newInput.value, 10);
+    if (!isNaN(currentValue)) newSlider.value = String(currentValue);
+    const sliderInputHandler = (e) => {
+      const raw = parseInt(e.target.value, 10);
+      currentValue = raw;
+      newInput.value = String(currentValue);
+      newInput.setAttribute('value', newInput.value);
+    };
+    newSlider.addEventListener('input', sliderInputHandler);
+    newSlider.addEventListener('change', sliderInputHandler);
+    const inputChangeHandler = (e) => {
+      const value = parseInt(e.target.value, 10);
+      if (!isNaN(value)) {
+        currentValue = value;
+        newSlider.value = String(value);
+        newSlider.setAttribute('value', newSlider.value);
+      }
+    };
+    newInput.addEventListener('input', inputChangeHandler);
+    newInput.addEventListener('change', inputChangeHandler);
+    newInput.addEventListener('click', (e) => e.stopPropagation());
+    newSlider.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  static getInputFromSlot(slotCard) {
+    return slotCard.querySelector('[data-action="update-duration"]');
+  }
+
+  static setDurationInSlot(slotCard, duration, config = null) {
+    const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
+      ? slotCard
+      : slotCard.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
+    if (config && (input || slider)) {
+      const minDuration = config.min_duration || 15;
+      const maxDuration = config.max_duration || 1440;
+      if (input) {
+        input.min = minDuration;
+        input.max = maxDuration;
+        input.step = 1;
+      }
+      if (slider) {
+        slider.min = minDuration;
+        slider.max = maxDuration;
+      }
+    }
+    if (input) {
+      input.value = duration != null && duration !== '' ? String(duration) : '';
+    }
+    if (slider) {
+      slider.value = duration != null && duration !== '' ? String(duration) : '';
+    }
+  }
+
+  static attachEventListenersInSlot(slotCard, onChangeCallback, config = null) {
+    const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
+      ? slotCard
+      : slotCard.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
+    if (config && input && slider) {
+      const minDuration = config.min_duration || 15;
+      const maxDuration = config.max_duration || 1440;
+      input.min = minDuration;
+      input.max = maxDuration;
+      input.step = 1;
+      slider.min = minDuration;
+      slider.max = maxDuration;
+    }
+    if (input && slider) {
+      const newInput = input.cloneNode(true);
+      const newSlider = slider.cloneNode(true);
+      input.parentNode.replaceChild(newInput, input);
+      slider.parentNode.replaceChild(newSlider, slider);
+      const minVal = parseInt(newInput.min, 10) || 0;
+      const maxVal = parseInt(newInput.max, 10) || 1440;
+      newSlider.min = minVal;
+      newSlider.max = maxVal;
+      let currentValue = parseInt(newInput.value, 10);
+      if (!isNaN(currentValue)) newSlider.value = String(currentValue);
+      const sliderHandler = (e) => {
+        const raw = parseInt(e.target.value, 10);
+        currentValue = raw;
+        newInput.value = String(currentValue);
+        newInput.setAttribute('value', newInput.value);
+        if (onChangeCallback) onChangeCallback(currentValue);
+      };
+      const inputHandler = (e) => {
+        const value = parseInt(e.target.value, 10);
+        if (!isNaN(value)) {
+          currentValue = value;
+          newSlider.value = String(value);
+          newSlider.setAttribute('value', newSlider.value);
+        }
+      };
+      const blurHandler = () => {
+        if (!isNaN(currentValue)) {
+          newInput.value = String(currentValue);
+          newInput.setAttribute('value', newInput.value);
+          if (onChangeCallback) onChangeCallback(currentValue);
+        }
+      };
+      newSlider.addEventListener('input', sliderHandler);
+      newSlider.addEventListener('change', sliderHandler);
+      newInput.addEventListener('input', inputHandler);
+      newInput.addEventListener('blur', blurHandler);
+      newInput.addEventListener('click', (e) => e.stopPropagation());
+      newSlider.addEventListener('click', (e) => e.stopPropagation());
+    }
+  }
+};
+
+// --- Hours variant (climate: 0.5–12 h, step 0.5) ---
 
 const HOURS_MIN = 0.5;
 const HOURS_MAX = 12;
 const HOURS_STEP = 0.5;
 
-// Prevent duplicate class declaration when multiple cards are loaded
-if (typeof window.DurationSelector === 'undefined') {
-  window.DurationSelector = class DurationSelector {
+const DurationSelectorHours = class DurationSelector {
   static computeStep(min, max, preferredStep = 0.5) {
     return preferredStep;
   }
 
-  /** @returns {number|null} Duration in hours, or null */
   static getSelectedDuration(shadowRoot) {
     let wrapper = null;
     if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
@@ -424,15 +623,16 @@ if (typeof window.DurationSelector === 'undefined') {
     return Number.isNaN(h) ? null : h;
   }
 
-  /** @param {number|null} duration - Duration in hours */
-  static setSelectedDuration(shadowRoot, duration) {
+  static setSelectedDuration(shadowRoot, duration, config = null) {
     const wrapper = shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')
       ? shadowRoot
       : shadowRoot.querySelector('.duration-selector-wrapper');
     const input = (wrapper || shadowRoot).querySelector('[data-action="update-duration"]');
     const slider = (wrapper || shadowRoot).querySelector('[data-action="update-duration-slider"]');
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
     const num = duration != null && duration !== '' ? parseFloat(duration) : NaN;
-    const val = Number.isNaN(num) ? '' : Math.max(HOURS_MIN, Math.min(HOURS_MAX, num));
+    const val = Number.isNaN(num) ? '' : Math.max(minH, Math.min(maxH, num));
     if (input) {
       input.value = val !== '' ? String(val) : '';
     }
@@ -445,7 +645,7 @@ if (typeof window.DurationSelector === 'undefined') {
     this.setSelectedDuration(shadowRoot, defaultDuration);
   }
 
-  static attachEventListeners(shadowRoot) {
+  static attachEventListeners(shadowRoot, config = null) {
     let wrapper = null;
     if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
       wrapper = shadowRoot;
@@ -456,22 +656,25 @@ if (typeof window.DurationSelector === 'undefined') {
     const input = wrapper.querySelector('[data-action="update-duration"]');
     const slider = wrapper.querySelector('[data-action="update-duration-slider"]');
     if (!input || !slider) return;
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
+    const stepH = config?.duration_step ?? HOURS_STEP;
     const newInput = input.cloneNode(true);
     const newSlider = slider.cloneNode(true);
     input.parentNode.replaceChild(newInput, input);
     slider.parentNode.replaceChild(newSlider, slider);
-    newInput.min = HOURS_MIN;
-    newInput.max = HOURS_MAX;
-    newInput.step = String(HOURS_STEP);
-    newSlider.min = HOURS_MIN;
-    newSlider.max = HOURS_MAX;
-    newSlider.step = String(HOURS_STEP);
+    newInput.min = minH;
+    newInput.max = maxH;
+    newInput.step = String(stepH);
+    newSlider.setAttribute('min', String(minH));
+    newSlider.setAttribute('max', String(maxH));
+    newSlider.setAttribute('step', String(stepH));
     let currentHours = parseFloat(newInput.value);
-    if (Number.isNaN(currentHours)) currentHours = HOURS_MIN;
+    if (Number.isNaN(currentHours)) currentHours = minH;
     newSlider.value = String(currentHours);
     const sliderInputHandler = (e) => {
       const val = parseFloat(e.target.value);
-      currentHours = Number.isNaN(val) ? HOURS_MIN : Math.max(HOURS_MIN, Math.min(HOURS_MAX, val));
+      currentHours = Number.isNaN(val) ? minH : Math.max(minH, Math.min(maxH, val));
       newInput.value = String(currentHours);
       newInput.setAttribute('value', newInput.value);
     };
@@ -480,7 +683,7 @@ if (typeof window.DurationSelector === 'undefined') {
     const inputChangeHandler = (e) => {
       const value = parseFloat(e.target.value);
       if (!isNaN(value)) {
-        currentHours = Math.max(HOURS_MIN, Math.min(HOURS_MAX, value));
+        currentHours = Math.max(minH, Math.min(maxH, value));
         newSlider.value = String(currentHours);
         newInput.setAttribute('value', String(currentHours));
       }
@@ -495,27 +698,27 @@ if (typeof window.DurationSelector === 'undefined') {
     return slotCard.querySelector('[data-action="update-duration"]');
   }
 
-  /** @param {number|null} duration - Duration in hours */
   static setDurationInSlot(slotCard, duration, config = null) {
     const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
       ? slotCard
       : slotCard.querySelector('.duration-selector-wrapper');
     const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
     const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
-    if (config && input) {
-      const minH = config.min_duration ?? HOURS_MIN;
-      const maxH = config.max_duration ?? HOURS_MAX;
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
+    const stepH = config?.duration_step ?? HOURS_STEP;
+    if (input) {
       input.min = minH;
       input.max = maxH;
-      input.step = String(HOURS_STEP);
+      input.step = String(stepH);
     }
     if (slider) {
-      slider.min = config?.min_duration ?? HOURS_MIN;
-      slider.max = config?.max_duration ?? HOURS_MAX;
-      slider.step = String(HOURS_STEP);
+      slider.setAttribute('min', String(minH));
+      slider.setAttribute('max', String(maxH));
+      slider.setAttribute('step', String(stepH));
     }
     const num = duration != null && duration !== '' ? parseFloat(duration) : NaN;
-    const val = Number.isNaN(num) ? '' : Math.max(HOURS_MIN, Math.min(HOURS_MAX, num));
+    const val = Number.isNaN(num) ? '' : Math.max(minH, Math.min(maxH, num));
     if (input) {
       input.value = val !== '' ? String(val) : '';
     }
@@ -532,27 +735,34 @@ if (typeof window.DurationSelector === 'undefined') {
     const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
     const minH = config?.min_duration ?? HOURS_MIN;
     const maxH = config?.max_duration ?? HOURS_MAX;
-    if (config && input) {
+    const stepH = config?.duration_step ?? HOURS_STEP;
+    if (input) {
       input.min = minH;
       input.max = maxH;
-      input.step = String(HOURS_STEP);
+      input.step = String(stepH);
     }
     if (slider) {
-      slider.min = minH;
-      slider.max = maxH;
-      slider.step = String(HOURS_STEP);
+      slider.setAttribute('min', String(minH));
+      slider.setAttribute('max', String(maxH));
+      slider.setAttribute('step', String(stepH));
     }
     if (input && slider) {
       const newInput = input.cloneNode(true);
       const newSlider = slider.cloneNode(true);
       input.parentNode.replaceChild(newInput, input);
       slider.parentNode.replaceChild(newSlider, slider);
+      newInput.min = minH;
+      newInput.max = maxH;
+      newInput.step = String(stepH);
+      newSlider.setAttribute('min', String(minH));
+      newSlider.setAttribute('max', String(maxH));
+      newSlider.setAttribute('step', String(stepH));
       let currentHours = parseFloat(newInput.value);
-      if (isNaN(currentHours)) currentHours = HOURS_MIN;
+      if (isNaN(currentHours)) currentHours = minH;
       newSlider.value = String(currentHours);
       const sliderHandler = (e) => {
         const val = parseFloat(e.target.value);
-        currentHours = Number.isNaN(val) ? HOURS_MIN : Math.max(HOURS_MIN, Math.min(HOURS_MAX, val));
+        currentHours = Number.isNaN(val) ? minH : Math.max(minH, Math.min(maxH, val));
         newInput.value = String(currentHours);
         newInput.setAttribute('value', newInput.value);
         if (onChangeCallback) onChangeCallback(currentHours);
@@ -560,7 +770,7 @@ if (typeof window.DurationSelector === 'undefined') {
       const inputHandler = (e) => {
         const value = parseFloat(e.target.value);
         if (!isNaN(value)) {
-          currentHours = Math.max(HOURS_MIN, Math.min(HOURS_MAX, value));
+          currentHours = Math.max(minH, Math.min(maxH, value));
           newSlider.value = String(currentHours);
           newInput.setAttribute('value', newInput.value);
         }
@@ -580,8 +790,11 @@ if (typeof window.DurationSelector === 'undefined') {
       newSlider.addEventListener('click', (e) => e.stopPropagation());
     }
   }
-  };
-}
+};
+
+// Globals: boiler uses DurationSelector (mins); climate uses DurationSelectorHours. One script in bundle sets both.
+window.DurationSelectorHours = DurationSelectorHours;
+window.DurationSelector = DurationSelectorMins;
 
 // Shared component: selector-weekday/weekday-selector.js
 /**
@@ -782,7 +995,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     this._bridgeSensor = null;
     this._debounceTimer = null;
     this._htmlTemplate = null;
-    this._expandedSlots = new Set(); // Track expanded slots by key (time|weekdays) so adding/removing entities doesn't collapse
+    this._expandedSlots = new Set(); // Track expanded slots by display key (time|weekdays|duration|mode|temp|fan|title)
     this._configError = null; // Store config error message
     this._unsubStateChanged = null; // Unsubscribe function for state_changed events
     this._optimisticBridgeState = null; // Local overlay for optimistic updates (avoids mutating hass.states)
@@ -1145,6 +1358,26 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     return e ? [e] : [];
   }
 
+  /** Display slot key: group in one card when time, weekdays, duration, mode, temperature, fan_mode and title (or no title) match. For mode Off, duration/temperature/fan_mode/title are not used. */
+  _slotKeyForItem(item) {
+    return (item?.entity_id || '') + '|' + (item?.time || '') + '|' + JSON.stringify(item?.weekdays || []);
+  }
+
+  /** Display key: time, weekdays, duration, mode, temp, fan, title. If several items share same (entity_id, time, weekdays) — use item.id so they don't merge (e.g. one with custom title, one without). */
+  _getDisplaySlotKey(item, duplicatedSlotKeys) {
+    if (!item) return '';
+    const mode = item.service_start?.value?.hvac_mode ?? '';
+    const isOff = mode === 'off';
+    const durationPart = isOff ? '' : (item.duration ?? '');
+    const temp = item.service_start?.value?.temperature;
+    const tempStr = isOff ? '' : (temp !== undefined && temp !== null ? String(temp) : '');
+    const fan = isOff ? '' : (item.service_start?.value?.fan_mode ?? '');
+    const slotKey = this._slotKeyForItem(item);
+    const isDuplicated = duplicatedSlotKeys && duplicatedSlotKeys.has(slotKey);
+    const titlePart = isDuplicated ? (item.id || '') : (item.title || '');
+    return (item.time || '') + '|' + JSON.stringify(item.weekdays || []) + '|' + durationPart + '|' + mode + '|' + tempStr + '|' + fan + '|' + titlePart;
+  }
+
   _getItems() {
     try {
       const entities = this._getEntities();
@@ -1159,10 +1392,16 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         entitySet.has(item.entity_id) && 
         item.temporary !== true
       );
-      // Dedupe by (time, weekdays): when both temp and real slot exist, show only one (prefer real)
+      const slotKeyCount = new Map();
+      for (const it of filtered) {
+        const sk = this._slotKeyForItem(it);
+        slotKeyCount.set(sk, (slotKeyCount.get(sk) || 0) + 1);
+      }
+      const duplicatedSlotKeys = new Set([...slotKeyCount.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+      // Dedupe by display key: when both temp and real slot exist, show only one (prefer real)
       const byKey = new Map();
       for (const item of filtered) {
-        const key = (item.time || '') + '|' + JSON.stringify(item.weekdays || []);
+        const key = this._getDisplaySlotKey(item, duplicatedSlotKeys);
         const existing = byKey.get(key);
         const isTemp = item.id && String(item.id).startsWith('temp-');
         if (!existing) {
@@ -1829,19 +2068,40 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       this._updateHvacModeWarning();
       this._updateAddPopupFanAndTemp();
       this._syncPopupDurationVisibility();
+      requestAnimationFrame(() => {
+        this._updateAddPopupFanAndTemp();
+        this._syncPopupDurationVisibility();
+      });
     }
   }
 
   _updateAddPopupFanAndTemp() {
     const root = this._getAddFormRoot();
     if (!root || !this._hass) return;
-    const selectedIds = this._getPopupSelectedEntityIds();
-    const entityId = selectedIds.length ? selectedIds[0] : this._getEntities()[0];
+    const hvacModeSelect = root.querySelector('[data-slot-form="mode"]');
     const fanSelect = root.querySelector('[data-slot-form="fan"]');
     const tempInput = root.querySelector('[data-slot-form="temp"]');
+    const isOff = hvacModeSelect && String(hvacModeSelect.value || '').trim().toLowerCase() === 'off';
+    if (isOff) {
+      if (tempInput) {
+        tempInput.value = '';
+        tempInput.placeholder = '—';
+        tempInput.disabled = true;
+        tempInput.setAttribute('disabled', '');
+      }
+      if (fanSelect) {
+        fanSelect.innerHTML = '<option value="">—</option>';
+        fanSelect.value = '';
+        fanSelect.disabled = true;
+        fanSelect.setAttribute('disabled', '');
+      }
+      return;
+    }
+    const selectedIds = this._getPopupSelectedEntityIds();
+    const entityId = selectedIds.length ? selectedIds[0] : this._getEntities()[0];
     if (!entityId) {
-      if (fanSelect) { fanSelect.innerHTML = '<option value="">—</option>'; fanSelect.value = ''; }
-      if (tempInput) { tempInput.min = 5; tempInput.max = 35; tempInput.value = 21; tempInput.placeholder = '—'; }
+      if (fanSelect) { fanSelect.innerHTML = '<option value="">—</option>'; fanSelect.value = ''; fanSelect.disabled = false; fanSelect.removeAttribute('disabled'); }
+      if (tempInput) { tempInput.min = 5; tempInput.max = 35; tempInput.value = 21; tempInput.placeholder = '—'; tempInput.disabled = false; tempInput.removeAttribute('disabled'); }
       return;
     }
     const state = this._hass.states[entityId];
@@ -1869,7 +2129,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       tempInput.step = attrs.target_temp_step ?? 0.5;
       tempInput.value = Math.max(min, Math.min(max, val));
       tempInput.placeholder = '—';
+      tempInput.disabled = false;
+      tempInput.removeAttribute('disabled');
     }
+    if (fanSelect) { fanSelect.disabled = false; fanSelect.removeAttribute('disabled'); }
   }
 
   _showAddPopupError(message) {
@@ -1896,13 +2159,33 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     return (b || []).some(d => setA.has(d));
   }
 
-  /** True if a slot already exists at (time) for any selected entity with at least one weekday overlapping. */
-  _hasAddSlotConflict(bridgeState, time, weekdays, selectedEntityIds) {
+  /** Content key for conflict detection: time, weekdays, mode, temp, fan, duration, title. */
+  _slotContentKey(data) {
+    const mode = data.service_start?.value?.hvac_mode ?? data.hvac_mode ?? '';
+    const isOff = mode === 'off';
+    const dur = isOff ? '' : (data.duration ?? '');
+    const temp = data.service_start?.value?.temperature ?? data.temperature;
+    const tempStr = isOff ? '' : (temp != null ? String(temp) : '');
+    const fan = isOff ? '' : (data.service_start?.value?.fan_mode ?? data.fan_mode ?? '');
+    const slotTitle = data.title ?? '';
+    return (data.time || '') + '|' + JSON.stringify(data.weekdays || []) + '|' + dur + '|' + mode + '|' + tempStr + '|' + fan + '|' + slotTitle;
+  }
+
+  /** True if a slot with same content (time, weekdays, mode, temp, fan, duration, title) already exists for any selected entity. */
+  _hasAddSlotConflict(bridgeState, time, weekdays, selectedEntityIds, newSlotData) {
     const allItems = bridgeState?.attributes?.items || [];
     const entitySet = new Set(selectedEntityIds);
+    if (!newSlotData) {
+      return allItems.some(i =>
+        i && !i.temporary && entitySet.has(i.entity_id) &&
+        i.time === time && this._weekdaysOverlap(weekdays, i.weekdays)
+      );
+    }
+    const newKey = this._slotContentKey({ ...newSlotData, time, weekdays });
     return allItems.some(i =>
       i && !i.temporary && entitySet.has(i.entity_id) &&
-      i.time === time && this._weekdaysOverlap(weekdays, i.weekdays)
+      i.time === time && this._weekdaysOverlap(weekdays, i.weekdays) &&
+      this._slotContentKey(i) === newKey
     );
   }
 
@@ -1966,12 +2249,6 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
     this._clearAddPopupError();
 
-    const bridgeState = this._getBridgeState();
-    if (this._hasAddSlotConflict(bridgeState, time, selectedDays, selectedEntityIds)) {
-      this._showAddPopupError('A slot already exists at this time and days for the selected entities.');
-      return;
-    }
-
     const fanSelect = root.querySelector('[data-slot-form="fan"]');
     const tempInput = root.querySelector('[data-slot-form="temp"]');
     const fanMode = fanSelect?.value || undefined;
@@ -1979,6 +2256,14 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     if (tempInput && tempInput.value !== '' && !Number.isNaN(Number(tempInput.value))) {
       temperature = parseFloat(tempInput.value);
     }
+
+    const bridgeState = this._getBridgeState();
+    const newSlotData = { time, weekdays: selectedDays, duration: durationValue, hvac_mode: hvacMode, temperature, fan_mode: fanMode, title };
+    if (this._hasAddSlotConflict(bridgeState, time, selectedDays, selectedEntityIds, newSlotData)) {
+      this._showAddPopupError('A slot with the same time, days, mode, and title already exists.');
+      return;
+    }
+
     const climateServicesByEntity = {};
     selectedEntityIds.forEach(eid => {
       climateServicesByEntity[eid] = ScheduleHelper.createClimateServices(eid, hvacMode, { temperature, fan_mode: fanMode });
@@ -2063,7 +2348,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     this._closeAddPopup();
   }
 
-  /** Climate duration limits (hours): fixed in code, not from dashboard config. */
+  /** Climate duration defaults (hours); actual values come from card config min_duration/max_duration/duration_step. */
   static get CLIMATE_DURATION_MIN() { return 0.5; }
   static get CLIMATE_DURATION_MAX() { return 12; }
   static get CLIMATE_DURATION_STEP() { return 0.5; }
@@ -2083,11 +2368,11 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     target.duration_step = source.duration_step ?? this.constructor.CLIMATE_DURATION_STEP;
   }
 
-  /** Duration config in hours: fixed 0.5–12, step 0.5 (same role as boiler _getDurationConfig but values hardcoded for climate). */
+  /** Duration config in hours: from card config (min_duration, max_duration, duration_step), same mechanism as boiler. */
   _getDurationConfig() {
-    const minDuration = this.constructor.CLIMATE_DURATION_MIN;
-    const maxDuration = this.constructor.CLIMATE_DURATION_MAX;
-    const durationStep = this.constructor.CLIMATE_DURATION_STEP;
+    const minDuration = this._config?.min_duration ?? this.constructor.CLIMATE_DURATION_MIN;
+    const maxDuration = this._config?.max_duration ?? this.constructor.CLIMATE_DURATION_MAX;
+    const durationStep = this._config?.duration_step ?? this.constructor.CLIMATE_DURATION_STEP;
     return { minDuration, maxDuration, durationStep };
   }
 
@@ -2299,17 +2584,44 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       }
     }
 
-    // Update Fan and Temp from service_start
+    // Update Fan and Temp from service_start (when mode is Off: show — and disabled)
+    const currentHvacModeSync = updatedItem.service_start?.value?.hvac_mode;
     const fanSelect = slotCard.querySelector('[data-slot-form="fan"]');
-    if (fanSelect && updatedItem.service_start?.value?.fan_mode != null) {
-      if (fanSelect.querySelector(`option[value="${updatedItem.service_start.value.fan_mode}"]`)) {
-        fanSelect.value = updatedItem.service_start.value.fan_mode;
-      }
-    }
     const tempInput = slotCard.querySelector('[data-slot-form="temp"]');
-    if (tempInput && updatedItem.service_start?.value?.temperature != null) {
-      const t = Number(updatedItem.service_start.value.temperature);
-      if (!Number.isNaN(t)) tempInput.value = t;
+    if (currentHvacModeSync === 'off') {
+      if (tempInput) {
+        tempInput.value = '';
+        tempInput.placeholder = '—';
+        tempInput.disabled = true;
+        tempInput.setAttribute('disabled', '');
+      }
+      if (fanSelect) {
+        if (!fanSelect.querySelector('option[value=""]')) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '—';
+          fanSelect.insertBefore(opt, fanSelect.firstChild);
+        }
+        fanSelect.value = '';
+        fanSelect.disabled = true;
+        fanSelect.setAttribute('disabled', '');
+      }
+    } else {
+      if (tempInput) {
+        tempInput.disabled = false;
+        tempInput.removeAttribute('disabled');
+        if (updatedItem.service_start?.value?.temperature != null) {
+          const t = Number(updatedItem.service_start.value.temperature);
+          if (!Number.isNaN(t)) tempInput.value = t;
+        }
+      }
+      if (fanSelect) {
+        fanSelect.disabled = false;
+        fanSelect.removeAttribute('disabled');
+        if (updatedItem.service_start?.value?.fan_mode != null && fanSelect.querySelector(`option[value="${updatedItem.service_start.value.fan_mode}"]`)) {
+          fanSelect.value = updatedItem.service_start.value.fan_mode;
+        }
+      }
     }
 
     // Update weekday selector state
@@ -2395,7 +2707,19 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       updates.service_start !== undefined ||
       updates.service_end !== undefined
     );
-    const itemIdsToUpdate = isSlotWideUpdate && bridgeState ? this._getSameSlotItemIds(bridgeState, itemId) : [itemId];
+    // Title-only update: match by display key (so slots with different titles stay separate).
+    // Other slot-wide updates (time/weekdays/duration/mode/enabled): match by time+weekdays (all entities in that position).
+    const isTitleOnlyUpdate = isSlotWideUpdate && updates.title !== undefined &&
+      updates.time === undefined && updates.duration === undefined && updates.weekdays === undefined &&
+      updates.enabled === undefined && updates.service_start === undefined && updates.service_end === undefined;
+    let itemIdsToUpdate;
+    if (!isSlotWideUpdate || !bridgeState) {
+      itemIdsToUpdate = [itemId];
+    } else if (isTitleOnlyUpdate) {
+      itemIdsToUpdate = this._getSameDisplaySlotItemIds(bridgeState, itemId);
+    } else {
+      itemIdsToUpdate = this._getSameSlotItemIds(bridgeState, itemId);
+    }
 
     // When editing time or weekdays: if another slot already exists at that time for these entities, show error and do not save
     if (bridgeState?.attributes?.items && (updates.time !== undefined || updates.weekdays !== undefined)) {
@@ -2407,8 +2731,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           this._showSlotError(itemId, 'A slot already exists at this time and days for the selected entities.');
           return;
         }
-        const oldKey = (currentItem.time || '') + '|' + JSON.stringify(currentItem.weekdays || []);
-        const newKey = (newTime || '') + '|' + JSON.stringify(newWeekdays || []);
+        const oldKey = this._getDisplaySlotKey(currentItem);
+        const newKey = this._getDisplaySlotKey({ ...currentItem, time: newTime, weekdays: newWeekdays });
         if (oldKey !== newKey && this._expandedSlots.has(oldKey)) {
           this._expandedSlots.delete(oldKey);
           this._expandedSlots.add(newKey);
@@ -2556,10 +2880,32 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
   }
 
-  /** Delete all items in the same slot (same time + weekdays) so the whole slot is removed. */
+  _getDuplicatedSlotKeys(filteredItems) {
+    const m = new Map();
+    for (const it of filteredItems) {
+      const sk = this._slotKeyForItem(it);
+      m.set(sk, (m.get(sk) || 0) + 1);
+    }
+    return new Set([...m.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+  }
+
+  /** IDs of items in the same *display* slot (same display key). Used for Remove so only the current card's records are deleted. */
+  _getSameDisplaySlotItemIds(bridgeState, itemId) {
+    const allItems = bridgeState?.attributes?.items || [];
+    const item = allItems.find(i => i && i.id === itemId);
+    if (!item) return [itemId];
+    const entitySet = new Set(this._getEntities());
+    const filtered = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+    const dupKeys = this._getDuplicatedSlotKeys(filtered);
+    const displayKey = this._getDisplaySlotKey(item, dupKeys);
+    const same = filtered.filter(i => this._getDisplaySlotKey(i, dupKeys) === displayKey);
+    return same.map(i => i.id).filter(Boolean);
+  }
+
+  /** Delete only items in the current (display) slot — same time, weekdays, duration, mode, temp, fan, title. */
   async _deleteSlot(itemId) {
     const bridgeState = this._getBridgeState();
-    const itemIdsToDelete = bridgeState ? this._getSameSlotItemIds(bridgeState, itemId) : [itemId];
+    const itemIdsToDelete = bridgeState ? this._getSameDisplaySlotItemIds(bridgeState, itemId) : [itemId];
     for (const id of itemIdsToDelete) {
       await this._callService('delete_item', { id });
     }
@@ -2780,10 +3126,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     const bridgeState = this._getBridgeState();
     const allItems = bridgeState?.attributes?.items || [];
     const entitySet = new Set(entities);
-    const sameSlotItems = entities.length > 1 ? allItems.filter(i =>
-      i && i.temporary !== true && entitySet.has(i.entity_id) &&
-      i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
-    ) : [];
+    const filtered = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+    const dupKeys = this._getDuplicatedSlotKeys(filtered);
+    const displayKey = this._getDisplaySlotKey(item, dupKeys);
+    const sameSlotItems = entities.length > 1 ? filtered.filter(i => this._getDisplaySlotKey(i, dupKeys) === displayKey) : [];
     let entityLabel = '';
     if (entities.length > 1) {
       const names = sameSlotItems.map(i => this._hass?.states?.[i.entity_id]?.attributes?.friendly_name || i.entity_id);
@@ -2865,6 +3211,11 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     const showDuration = currentHvacMode !== 'off';
     const durationStr = showDuration ? this._formatDuration(item.duration) : '';
     const slotStatus = `${statusPrefix}, ${daysText} on ${item.time}${durationStr}`;
+
+    if (currentHvacMode === 'off') {
+      tempValue = '';
+      fanOptions = '<option value="">—</option>';
+    }
     
     // Prepare time placeholders
     const [hours, minutes] = item.time.split(':');
@@ -2946,6 +3297,19 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       const tempInput = slotCard.querySelector('[data-slot-form="temp"]');
       if (tempInput) {
         tempInput.value = tempValue;
+        if (currentHvacMode === 'off') {
+          tempInput.placeholder = '—';
+          tempInput.disabled = true;
+          tempInput.setAttribute('disabled', '');
+        }
+      }
+      if (currentHvacMode === 'off') {
+        const fanSelectOff = slotCard.querySelector('[data-slot-form="fan"]');
+        if (fanSelectOff) {
+          fanSelectOff.value = '';
+          fanSelectOff.disabled = true;
+          fanSelectOff.setAttribute('disabled', '');
+        }
       }
       
       result = tempDiv.innerHTML;
@@ -3006,19 +3370,19 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           durationWrapper.style.display = 'block';
           const durationInput = durationWrapper.querySelector('[data-action="update-duration"]');
           const durationSlider = durationWrapper.querySelector('[data-action="update-duration-slider"]');
-          const { minDuration, maxDuration } = this._getDurationConfig();
+          const { minDuration, maxDuration, durationStep } = this._getDurationConfig();
           if (durationInput) {
             durationInput.min = minDuration;
             durationInput.max = maxDuration;
-            durationInput.step = '0.5';
+            durationInput.step = String(durationStep);
           }
           if (durationSlider) {
-            durationSlider.min = minDuration;
-            durationSlider.max = maxDuration;
-            durationSlider.step = '0.5';
+            durationSlider.setAttribute('min', String(minDuration));
+            durationSlider.setAttribute('max', String(maxDuration));
+            durationSlider.setAttribute('step', String(durationStep));
           }
-          DurationSelector.setSelectedDuration(durationWrapper, minDuration);
-          DurationSelector.attachEventListeners(durationWrapper);
+          DurationSelector.setSelectedDuration(durationWrapper, minDuration, this._config);
+          DurationSelector.attachEventListeners(durationWrapper, this._config);
         } else {
           durationWrapper.style.display = 'none';
           DurationSelector.reset(durationWrapper, null);
@@ -3037,10 +3401,13 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
     const hvacModeSelect = addRoot?.querySelector('[data-slot-form="mode"]');
     if (hvacModeSelect) {
-      hvacModeSelect.addEventListener('change', () => {
+      const syncPopupModeDependent = () => {
         this._updateHvacModeWarning();
         this._syncPopupDurationVisibility();
-      });
+        this._updateAddPopupFanAndTemp();
+      };
+      hvacModeSelect.addEventListener('change', syncPopupModeDependent);
+      hvacModeSelect.addEventListener('input', syncPopupModeDependent);
     }
     this._syncPopupDurationVisibility();
     
@@ -3053,6 +3420,11 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
 
     // Item actions
+    const _bridgeState = this._getBridgeState();
+    const _allItems = _bridgeState?.attributes?.items || [];
+    const _entitySet = new Set(this._getEntities());
+    const _filtered = _allItems.filter(i => i && i.temporary !== true && _entitySet.has(i.entity_id));
+    const _dupKeys = this._getDuplicatedSlotKeys(_filtered);
     this.shadowRoot.querySelectorAll('.slot-card').forEach(itemEl => {
       const itemId = itemEl.dataset.itemId;
       const items = this._getItems();
@@ -3069,7 +3441,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         });
       }
 
-      const slotKey = (item.time || '') + '|' + JSON.stringify(item.weekdays || []);
+      const slotKey = this._getDisplaySlotKey(item, _dupKeys);
 
       // Toggle expand/collapse
       const expandBtn = itemEl.querySelector('[data-action="toggle-expand"]');
@@ -3091,7 +3463,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         });
       }
 
-      // Restore expanded state if this slot was expanded before (by time+weekdays so it survives entity add/remove)
+      // Restore expanded state if this slot was expanded before (by display key)
       if (this._expandedSlots.has(slotKey)) {
         itemEl.classList.add('expanded');
         const icon = expandBtn?.querySelector('ha-icon');
@@ -3269,10 +3641,33 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
               durationWrapper.style.display = 'none';
               DurationSelector.reset(itemEl, null);
             }
+            const tempInputSlot = itemEl.querySelector('[data-slot-form="temp"]');
+            const fanSelectSlot = itemEl.querySelector('[data-slot-form="fan"]');
+            if (tempInputSlot) {
+              tempInputSlot.value = '';
+              tempInputSlot.placeholder = '—';
+              tempInputSlot.disabled = true;
+              tempInputSlot.setAttribute('disabled', '');
+            }
+            if (fanSelectSlot) {
+              if (!fanSelectSlot.querySelector('option[value=""]')) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = '—';
+                fanSelectSlot.insertBefore(opt, fanSelectSlot.firstChild);
+              }
+              fanSelectSlot.value = '';
+              fanSelectSlot.disabled = true;
+              fanSelectSlot.setAttribute('disabled', '');
+            }
             const serviceStart = { name: 'climate.set_hvac_mode', value: { entity_id: currentItem.entity_id, hvac_mode: 'off' } };
             this._updateItem(itemId, { service_start: serviceStart, clear_duration: true });
           } else {
             if (durationEnabledSwitch) durationEnabledSwitch.checked = true;
+            const tempInputSlot = itemEl.querySelector('[data-slot-form="temp"]');
+            const fanSelectSlot = itemEl.querySelector('[data-slot-form="fan"]');
+            if (tempInputSlot) { tempInputSlot.disabled = false; tempInputSlot.removeAttribute('disabled'); }
+            if (fanSelectSlot) { fanSelectSlot.disabled = false; fanSelectSlot.removeAttribute('disabled'); }
             if (durationWrapper) {
               durationWrapper.style.display = 'block';
               const { minDuration } = this._getDurationConfig();
@@ -3336,10 +3731,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           const bridgeState = this._getBridgeState();
           const allItems = bridgeState?.attributes?.items || [];
           const entitySet = new Set(entities);
-          const sameSlotItems = allItems.filter(i =>
-            i && i.temporary !== true && entitySet.has(i.entity_id) &&
-            i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
-          );
+          const filteredForSlot = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+          const dupKeysSlot = this._getDuplicatedSlotKeys(filteredForSlot);
+          const displayKeyForSlot = this._getDisplaySlotKey(item, dupKeysSlot);
+          const sameSlotItems = filteredForSlot.filter(i => this._getDisplaySlotKey(i, dupKeysSlot) === displayKeyForSlot);
           const entityIdsToItemIds = {};
           sameSlotItems.forEach(i => { entityIdsToItemIds[i.entity_id] = i.id; });
           slotEntitiesWrap.dataset.slotEntityIds = JSON.stringify(entityIdsToItemIds);
@@ -3376,10 +3771,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
               if (open) {
                 const bridgeState = this._getBridgeState();
                 const allItems = bridgeState?.attributes?.items || [];
-                const sameSlotItemsNow = allItems.filter(i =>
-                  i && i.temporary !== true && entitySet.has(i.entity_id) &&
-                  i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
-                );
+                const filteredNow = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+                const dupKeysNow = this._getDuplicatedSlotKeys(filteredNow);
+                const displayKeyForSlot = this._getDisplaySlotKey(item, dupKeysNow);
+                const sameSlotItemsNow = filteredNow.filter(i => this._getDisplaySlotKey(i, dupKeysNow) === displayKeyForSlot);
                 const initialChecked = new Set(sameSlotItemsNow.map(i => i.entity_id));
                 const initialIds = {};
                 sameSlotItemsNow.forEach(i => { initialIds[i.entity_id] = i.id; });

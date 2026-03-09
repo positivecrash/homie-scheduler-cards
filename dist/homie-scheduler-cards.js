@@ -1,25 +1,21 @@
 /**
  * Homie Scheduler Cards - All-in-one bundle
- * Contains: boiler-button, boiler-status, boiler-slots, climate-slots
+ * Last build: 2026-03-06T15:15:51.828Z
  * Version: 1.1.1
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.1';
 
+
+const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
 // Shared Components (auto-included from shared/)
 // Shared component: card-console-info/card-console-info.js
 /**
  * Shared console info for Homie Scheduler cards.
- * Logs branded card name and release version (set at build time).
- * Uses window.logCardInfo so the bundle can include this file multiple times (one per card) without redeclaration error.
+ * Logs branded card name. No version in resources to avoid cache sticking to old builds.
  */
 if (typeof window.logCardInfo === 'undefined') {
   window.logCardInfo = function (cardName) {
-    var version = typeof window.__HOMIE_SCHEDULER_CARDS_VERSION !== 'undefined'
-      ? window.__HOMIE_SCHEDULER_CARDS_VERSION
-      : 'dev';
-    var label = cardName + ' v' + version;
     console.info(
-      '%c Homie Scheduler %c ' + label,
+      '%c Homie Scheduler %c ' + cardName,
       'color: white; background:rgb(94, 94, 243); font-weight: 700; padding 5px;',
       'color: rgb(94, 94, 243); background: white; font-weight: 700; padding 5px;'
     );
@@ -378,6 +374,424 @@ if (typeof window.ScheduleHelper === 'undefined') {
   
   // Already assigned to window.ScheduleHelper above, no need to reassign
 }
+
+// Shared component: selector-duration/selector-duration.js
+/**
+ * Duration Selector — shared module.
+ * Two variants: DurationSelectorMins (boiler, minutes) and DurationSelectorHours (climate, hours).
+ * In bundle, boiler loads first and sets window.DurationSelector = Mins; climate uses window.DurationSelectorHours.
+ */
+
+// --- Minutes variant (boiler: 15–1440 min, step 15) ---
+
+const DurationSelectorMins = class DurationSelector {
+  static computeStep(min, max, preferredStep = 15) {
+    const range = max - min;
+    if (range <= 0) return 1;
+    if (preferredStep >= range) return range;
+    const divisors = [];
+    for (let i = 1; i <= range; i++) {
+      if (range % i === 0) divisors.push(i);
+    }
+    if (divisors.length === 0) return 1;
+    let best = divisors[0];
+    for (let j = 0; j < divisors.length; j++) {
+      const d = divisors[j];
+      if (Math.abs(d - preferredStep) < Math.abs(best - preferredStep)) best = d;
+    }
+    return best;
+  }
+
+  static computeAllowedValues(min, max, stepBase = 5) {
+    if (max < min) return [min];
+    const list = [];
+    let v = Math.ceil(min / stepBase) * stepBase;
+    if (v > min) list.push(min);
+    while (v <= max) {
+      list.push(v);
+      v += stepBase;
+    }
+    if (list.length && list[list.length - 1] < max) list.push(max);
+    return list;
+  }
+
+  static getSelectedDuration(shadowRoot) {
+    let wrapper = null;
+    if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
+      wrapper = shadowRoot;
+    } else {
+      wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
+    }
+    if (wrapper) {
+      const input = wrapper.querySelector('[data-action="update-duration"]');
+      if (input) {
+        const value = input.value;
+        return value && value !== '' ? parseInt(value, 10) : null;
+      }
+    }
+    const input = shadowRoot.querySelector('[data-action="update-duration"]');
+    if (!input) return null;
+    const value = input.value;
+    return value && value !== '' ? parseInt(value, 10) : null;
+  }
+
+  static setSelectedDuration(shadowRoot, duration) {
+    const wrapper = shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')
+      ? shadowRoot
+      : shadowRoot.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || shadowRoot).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || shadowRoot).querySelector('[data-action="update-duration-slider"]');
+    if (input) {
+      input.value = duration != null && duration !== '' ? String(duration) : '';
+    }
+    if (slider) {
+      slider.value = duration != null && duration !== '' ? String(duration) : '';
+    }
+  }
+
+  static reset(shadowRoot, defaultDuration = 30) {
+    this.setSelectedDuration(shadowRoot, defaultDuration);
+  }
+
+  static attachEventListeners(shadowRoot) {
+    let wrapper = null;
+    if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
+      wrapper = shadowRoot;
+    } else {
+      wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
+    }
+    if (!wrapper) return;
+    const input = wrapper.querySelector('[data-action="update-duration"]');
+    const slider = wrapper.querySelector('[data-action="update-duration-slider"]');
+    if (!input || !slider) return;
+    const newInput = input.cloneNode(true);
+    const newSlider = slider.cloneNode(true);
+    input.parentNode.replaceChild(newInput, input);
+    slider.parentNode.replaceChild(newSlider, slider);
+    const minVal = parseInt(newInput.min, 10) || 0;
+    const maxVal = parseInt(newInput.max, 10) || 1440;
+    newSlider.min = minVal;
+    newSlider.max = maxVal;
+    let currentValue = parseInt(newInput.value, 10);
+    if (!isNaN(currentValue)) newSlider.value = String(currentValue);
+    const sliderInputHandler = (e) => {
+      const raw = parseInt(e.target.value, 10);
+      currentValue = raw;
+      newInput.value = String(currentValue);
+      newInput.setAttribute('value', newInput.value);
+    };
+    newSlider.addEventListener('input', sliderInputHandler);
+    newSlider.addEventListener('change', sliderInputHandler);
+    const inputChangeHandler = (e) => {
+      const value = parseInt(e.target.value, 10);
+      if (!isNaN(value)) {
+        currentValue = value;
+        newSlider.value = String(value);
+        newSlider.setAttribute('value', newSlider.value);
+      }
+    };
+    newInput.addEventListener('input', inputChangeHandler);
+    newInput.addEventListener('change', inputChangeHandler);
+    newInput.addEventListener('click', (e) => e.stopPropagation());
+    newSlider.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  static getInputFromSlot(slotCard) {
+    return slotCard.querySelector('[data-action="update-duration"]');
+  }
+
+  static setDurationInSlot(slotCard, duration, config = null) {
+    const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
+      ? slotCard
+      : slotCard.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
+    if (config && (input || slider)) {
+      const minDuration = config.min_duration || 15;
+      const maxDuration = config.max_duration || 1440;
+      if (input) {
+        input.min = minDuration;
+        input.max = maxDuration;
+        input.step = 1;
+      }
+      if (slider) {
+        slider.min = minDuration;
+        slider.max = maxDuration;
+      }
+    }
+    if (input) {
+      input.value = duration != null && duration !== '' ? String(duration) : '';
+    }
+    if (slider) {
+      slider.value = duration != null && duration !== '' ? String(duration) : '';
+    }
+  }
+
+  static attachEventListenersInSlot(slotCard, onChangeCallback, config = null) {
+    const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
+      ? slotCard
+      : slotCard.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
+    if (config && input && slider) {
+      const minDuration = config.min_duration || 15;
+      const maxDuration = config.max_duration || 1440;
+      input.min = minDuration;
+      input.max = maxDuration;
+      input.step = 1;
+      slider.min = minDuration;
+      slider.max = maxDuration;
+    }
+    if (input && slider) {
+      const newInput = input.cloneNode(true);
+      const newSlider = slider.cloneNode(true);
+      input.parentNode.replaceChild(newInput, input);
+      slider.parentNode.replaceChild(newSlider, slider);
+      const minVal = parseInt(newInput.min, 10) || 0;
+      const maxVal = parseInt(newInput.max, 10) || 1440;
+      newSlider.min = minVal;
+      newSlider.max = maxVal;
+      let currentValue = parseInt(newInput.value, 10);
+      if (!isNaN(currentValue)) newSlider.value = String(currentValue);
+      const sliderHandler = (e) => {
+        const raw = parseInt(e.target.value, 10);
+        currentValue = raw;
+        newInput.value = String(currentValue);
+        newInput.setAttribute('value', newInput.value);
+        if (onChangeCallback) onChangeCallback(currentValue);
+      };
+      const inputHandler = (e) => {
+        const value = parseInt(e.target.value, 10);
+        if (!isNaN(value)) {
+          currentValue = value;
+          newSlider.value = String(value);
+          newSlider.setAttribute('value', newSlider.value);
+        }
+      };
+      const blurHandler = () => {
+        if (!isNaN(currentValue)) {
+          newInput.value = String(currentValue);
+          newInput.setAttribute('value', newInput.value);
+          if (onChangeCallback) onChangeCallback(currentValue);
+        }
+      };
+      newSlider.addEventListener('input', sliderHandler);
+      newSlider.addEventListener('change', sliderHandler);
+      newInput.addEventListener('input', inputHandler);
+      newInput.addEventListener('blur', blurHandler);
+      newInput.addEventListener('click', (e) => e.stopPropagation());
+      newSlider.addEventListener('click', (e) => e.stopPropagation());
+    }
+  }
+};
+
+// --- Hours variant (climate: 0.5–12 h, step 0.5) ---
+
+const HOURS_MIN = 0.5;
+const HOURS_MAX = 12;
+const HOURS_STEP = 0.5;
+
+const DurationSelectorHours = class DurationSelector {
+  static computeStep(min, max, preferredStep = 0.5) {
+    return preferredStep;
+  }
+
+  static getSelectedDuration(shadowRoot) {
+    let wrapper = null;
+    if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
+      wrapper = shadowRoot;
+    } else {
+      wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
+    }
+    if (wrapper) {
+      const input = wrapper.querySelector('[data-action="update-duration"]');
+      if (input) {
+        const value = input.value;
+        if (value === '' || value == null) return null;
+        const h = parseFloat(value);
+        return Number.isNaN(h) ? null : h;
+      }
+    }
+    const input = shadowRoot.querySelector('[data-action="update-duration"]');
+    if (!input) return null;
+    const value = input.value;
+    if (value === '' || value == null) return null;
+    const h = parseFloat(value);
+    return Number.isNaN(h) ? null : h;
+  }
+
+  static setSelectedDuration(shadowRoot, duration, config = null) {
+    const wrapper = shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')
+      ? shadowRoot
+      : shadowRoot.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || shadowRoot).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || shadowRoot).querySelector('[data-action="update-duration-slider"]');
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
+    const num = duration != null && duration !== '' ? parseFloat(duration) : NaN;
+    const val = Number.isNaN(num) ? '' : Math.max(minH, Math.min(maxH, num));
+    if (input) {
+      input.value = val !== '' ? String(val) : '';
+    }
+    if (slider) {
+      slider.value = val !== '' ? String(val) : '';
+    }
+  }
+
+  static reset(shadowRoot, defaultDuration = null) {
+    this.setSelectedDuration(shadowRoot, defaultDuration);
+  }
+
+  static attachEventListeners(shadowRoot, config = null) {
+    let wrapper = null;
+    if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
+      wrapper = shadowRoot;
+    } else {
+      wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
+    }
+    if (!wrapper) return;
+    const input = wrapper.querySelector('[data-action="update-duration"]');
+    const slider = wrapper.querySelector('[data-action="update-duration-slider"]');
+    if (!input || !slider) return;
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
+    const stepH = config?.duration_step ?? HOURS_STEP;
+    const newInput = input.cloneNode(true);
+    const newSlider = slider.cloneNode(true);
+    input.parentNode.replaceChild(newInput, input);
+    slider.parentNode.replaceChild(newSlider, slider);
+    newInput.min = minH;
+    newInput.max = maxH;
+    newInput.step = String(stepH);
+    newSlider.setAttribute('min', String(minH));
+    newSlider.setAttribute('max', String(maxH));
+    newSlider.setAttribute('step', String(stepH));
+    let currentHours = parseFloat(newInput.value);
+    if (Number.isNaN(currentHours)) currentHours = minH;
+    newSlider.value = String(currentHours);
+    const sliderInputHandler = (e) => {
+      const val = parseFloat(e.target.value);
+      currentHours = Number.isNaN(val) ? minH : Math.max(minH, Math.min(maxH, val));
+      newInput.value = String(currentHours);
+      newInput.setAttribute('value', newInput.value);
+    };
+    newSlider.addEventListener('input', sliderInputHandler);
+    newSlider.addEventListener('change', sliderInputHandler);
+    const inputChangeHandler = (e) => {
+      const value = parseFloat(e.target.value);
+      if (!isNaN(value)) {
+        currentHours = Math.max(minH, Math.min(maxH, value));
+        newSlider.value = String(currentHours);
+        newInput.setAttribute('value', String(currentHours));
+      }
+    };
+    newInput.addEventListener('input', inputChangeHandler);
+    newInput.addEventListener('change', inputChangeHandler);
+    newInput.addEventListener('click', (e) => e.stopPropagation());
+    newSlider.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  static getInputFromSlot(slotCard) {
+    return slotCard.querySelector('[data-action="update-duration"]');
+  }
+
+  static setDurationInSlot(slotCard, duration, config = null) {
+    const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
+      ? slotCard
+      : slotCard.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
+    const stepH = config?.duration_step ?? HOURS_STEP;
+    if (input) {
+      input.min = minH;
+      input.max = maxH;
+      input.step = String(stepH);
+    }
+    if (slider) {
+      slider.setAttribute('min', String(minH));
+      slider.setAttribute('max', String(maxH));
+      slider.setAttribute('step', String(stepH));
+    }
+    const num = duration != null && duration !== '' ? parseFloat(duration) : NaN;
+    const val = Number.isNaN(num) ? '' : Math.max(minH, Math.min(maxH, num));
+    if (input) {
+      input.value = val !== '' ? String(val) : '';
+    }
+    if (slider) {
+      slider.value = val !== '' ? String(val) : '';
+    }
+  }
+
+  static attachEventListenersInSlot(slotCard, onChangeCallback, config = null) {
+    const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
+      ? slotCard
+      : slotCard.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
+    const stepH = config?.duration_step ?? HOURS_STEP;
+    if (input) {
+      input.min = minH;
+      input.max = maxH;
+      input.step = String(stepH);
+    }
+    if (slider) {
+      slider.setAttribute('min', String(minH));
+      slider.setAttribute('max', String(maxH));
+      slider.setAttribute('step', String(stepH));
+    }
+    if (input && slider) {
+      const newInput = input.cloneNode(true);
+      const newSlider = slider.cloneNode(true);
+      input.parentNode.replaceChild(newInput, input);
+      slider.parentNode.replaceChild(newSlider, slider);
+      newInput.min = minH;
+      newInput.max = maxH;
+      newInput.step = String(stepH);
+      newSlider.setAttribute('min', String(minH));
+      newSlider.setAttribute('max', String(maxH));
+      newSlider.setAttribute('step', String(stepH));
+      let currentHours = parseFloat(newInput.value);
+      if (isNaN(currentHours)) currentHours = minH;
+      newSlider.value = String(currentHours);
+      const sliderHandler = (e) => {
+        const val = parseFloat(e.target.value);
+        currentHours = Number.isNaN(val) ? minH : Math.max(minH, Math.min(maxH, val));
+        newInput.value = String(currentHours);
+        newInput.setAttribute('value', newInput.value);
+        if (onChangeCallback) onChangeCallback(currentHours);
+      };
+      const inputHandler = (e) => {
+        const value = parseFloat(e.target.value);
+        if (!isNaN(value)) {
+          currentHours = Math.max(minH, Math.min(maxH, value));
+          newSlider.value = String(currentHours);
+          newInput.setAttribute('value', newInput.value);
+        }
+      };
+      const blurHandler = () => {
+        if (!isNaN(currentHours)) {
+          newInput.value = String(currentHours);
+          newInput.setAttribute('value', newInput.value);
+          if (onChangeCallback) onChangeCallback(currentHours);
+        }
+      };
+      newSlider.addEventListener('input', sliderHandler);
+      newSlider.addEventListener('change', sliderHandler);
+      newInput.addEventListener('input', inputHandler);
+      newInput.addEventListener('blur', blurHandler);
+      newInput.addEventListener('click', (e) => e.stopPropagation());
+      newSlider.addEventListener('click', (e) => e.stopPropagation());
+    }
+  }
+};
+
+// Globals: boiler uses DurationSelector (mins); climate uses DurationSelectorHours. One script in bundle sets both.
+window.DurationSelectorHours = DurationSelectorHours;
+window.DurationSelector = DurationSelectorMins;
 
 // Shared component: selector-weekday/weekday-selector.js
 /**
@@ -2320,7 +2734,6 @@ if (typeof customElements !== 'undefined' && !customElements.get('homie-schedule
   window.logCardInfo('boiler-status-card');
 }
 
-const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
 
 
 class HomieBoilerScheduleSlotsCard extends HTMLElement {
@@ -2348,7 +2761,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
     if (this._htmlTemplate) return this._htmlTemplate;
     
     // Template is embedded in production build
-    this._htmlTemplate = `  <!-- Main Header -->\n  <div class="main-header">\n    <div class="header-left">\n      <div class="header-icon {{ENABLED_CLASS}}" data-action="toggle-enabled" title="Toggle scheduler">\n        <ha-icon icon="mdi:calendar-clock"></ha-icon>\n        <!-- <ha-icon icon="{{ICON}}"></ha-icon> -->\n      </div>\n      <div class="header-text">\n        <div class="header-title {{HEADER_TITLE_CLASS}}">\n          {{TITLE}}\n        </div>\n        <div class="header-status">{{STATUS_TEXT}}</div>\n      </div>\n    </div>\n  </div>\n  \n  <!-- Slots List (hidden when 0 slots) -->\n  <div class="slots-container{{SLOTS_CONTAINER_CLASS}}">\n    {{ITEMS_CONTENT}}\n  </div>\n  \n  <!-- Add Slot Button -->\n  <button class="button-outline" data-action="open-add-popup">\n    Add Schedule Slot\n  </button>\n  \n  <!-- Add Slot Popup -->\n  <div class="popup-overlay" id="add-popup" style="display: none;">\n    <div class="popup-content">\n      <div class="popup-header">\n        <ha-icon icon="mdi:power"></ha-icon>\n        <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">\n          <span class="popup-title">Add Schedule Slot</span>\n          <div style="font-size: 12px; color: var(--secondary-text-color, #757575);">\n            for {{ENTITY_NAME}}\n          </div>\n        </div>\n        <button class="popup-close" data-action="close-popup">\n          <ha-icon icon="mdi:close"></ha-icon>\n        </button>\n      </div>\n      \n      <div class="popup-body">\n        <div id="add-popup-error" class="popup-error" style="display: none;"></div>\n        <!-- Title Input -->\n        <div class="popup-field">\n          <label>\n            <ha-icon icon="mdi:label-outline"></ha-icon>\n            <span>Title (optional)</span>\n          </label>\n          <input type="text" class="homie-input" id="popup-title" placeholder="e.g. Morning heating">\n        </div>\n        \n        <!-- Time Input -->\n        <div class="popup-field">\n          <label>\n            <ha-icon icon="mdi:clock-outline"></ha-icon>\n            <span>Start Time</span>\n          </label>\n          <div class="time-selects">\n            <select class="homie-select popup-time-hours" id="popup-time-hours">\n              <option value="00">00</option>\n              <option value="01">01</option>\n              <option value="02">02</option>\n              <option value="03">03</option>\n              <option value="04">04</option>\n              <option value="05">05</option>\n              <option value="06">06</option>\n              <option value="07">07</option>\n              <option value="08" selected>08</option>\n              <option value="09">09</option>\n              <option value="10">10</option>\n              <option value="11">11</option>\n              <option value="12">12</option>\n              <option value="13">13</option>\n              <option value="14">14</option>\n              <option value="15">15</option>\n              <option value="16">16</option>\n              <option value="17">17</option>\n              <option value="18">18</option>\n              <option value="19">19</option>\n              <option value="20">20</option>\n              <option value="21">21</option>\n              <option value="22">22</option>\n              <option value="23">23</option>\n            </select>\n            <span class="time-separator">:</span>\n            <select class="homie-select popup-time-minutes" id="popup-time-minutes">\n              <option value="00" selected>00</option>\n              <option value="05">05</option>\n              <option value="10">10</option>\n              <option value="15">15</option>\n              <option value="20">20</option>\n              <option value="25">25</option>\n              <option value="30">30</option>\n              <option value="35">35</option>\n              <option value="40">40</option>\n              <option value="45">45</option>\n              <option value="50">50</option>\n              <option value="55">55</option>\n            </select>\n          </div>\n        </div>\n        \n        <!-- Duration Selector -->\n        <div class="popup-field">\n          <label>\n            <ha-icon icon="mdi:timer-outline"></ha-icon>\n            <span>Duration (minutes)</span>\n          </label>\n          <!-- SHARED:duration-selector -->\n<!-- Duration Selector (minutes) - slider + number input -->\n<div class="duration-selector-wrapper">\n  <input \n    type="range" \n    class="duration-slider" \n    data-action="update-duration-slider"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    value="{{DURATION_VALUE}}"\n  />\n  <input \n    type="number" \n    class="duration-input homie-input" \n    data-action="update-duration"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    step="1"\n    value="{{DURATION_VALUE}}"\n  />\n</div>\n<!-- END:duration-selector -->\n        </div>\n        \n        <!-- Weekday Selector -->\n        <div class="popup-field">\n          <label>\n            <ha-icon icon="mdi:calendar"></ha-icon>\n            <span>Days of Week</span>\n          </label>\n          <!-- SHARED:weekday-selector -->\n<!-- Weekday Selection Component (universal - without popup-field) -->\n<div class="weekday-mode-selector">\n  <button type="button" class="weekday-mode-btn active" data-mode="everyday">Everyday</button>\n  <button type="button" class="weekday-mode-btn" data-mode="weekdays">Weekdays</button>\n  <button type="button" class="weekday-mode-btn" data-mode="custom">Custom</button>\n</div>\n<div class="popup-weekdays hidden" id="popup-weekdays-custom">\n  <div class="popup-weekday" data-day="0">Mon</div>\n  <div class="popup-weekday" data-day="1">Tue</div>\n  <div class="popup-weekday" data-day="2">Wed</div>\n  <div class="popup-weekday" data-day="3">Thu</div>\n  <div class="popup-weekday" data-day="4">Fri</div>\n  <div class="popup-weekday" data-day="5">Sat</div>\n  <div class="popup-weekday" data-day="6">Sun</div>\n</div>\n<!-- END:weekday-selector -->\n        </div>\n      </div>\n      \n      <div class="popup-footer">\n        <button class="popup-button cancel" data-action="close-popup">Cancel</button>\n        <button class="popup-button save" data-action="save-slot">Save</button>\n      </div>\n    </div>\n  </div>\n\n<!-- Slot Item Template -->\n<template id="slot-item-template">\n  <div class="slot-card {{DISABLED_CLASS}}" data-item-id="{{ITEM_ID}}">\n    <div class="slot-header">\n      <div class="slot-icon {{ICON_CLASS}}" data-action="toggle-item" title="Toggle slot">\n        <ha-icon icon="mdi:power"></ha-icon>\n      </div>\n      <div class="slot-info">\n        <div class="slot-name">{{SLOT_NAME}}</div>\n        <div class="slot-status">{{SLOT_STATUS}}</div>\n      </div>\n    </div>\n    <button class="slot-expand" data-action="toggle-expand" title="Expand/collapse details">\n      <ha-icon icon="mdi:chevron-down"></ha-icon>\n    </button>\n    \n    <div class="slot-expandable">\n      <div class="slot-error-message" data-slot-error style="display: none;"></div>\n      <div class="slot-details">\n        <div class="slot-title">\n          <ha-icon icon="mdi:label-outline"></ha-icon>\n          <input type="text" class="homie-input slot-title-input" data-action="update-title" data-item-id="{{ITEM_ID}}" value="{{SLOT_TITLE}}" placeholder="Slot name">\n        </div>\n        <div class="slot-time">\n          <ha-icon icon="mdi:clock-outline"></ha-icon>\n          <div class="time-selects">\n            <select class="homie-select slot-time-hours" data-action="update-time-hours" data-item-id="{{ITEM_ID}}">\n              <option value="00" {{TIME_HOURS_00}}>00</option>\n              <option value="01" {{TIME_HOURS_01}}>01</option>\n              <option value="02" {{TIME_HOURS_02}}>02</option>\n              <option value="03" {{TIME_HOURS_03}}>03</option>\n              <option value="04" {{TIME_HOURS_04}}>04</option>\n              <option value="05" {{TIME_HOURS_05}}>05</option>\n              <option value="06" {{TIME_HOURS_06}}>06</option>\n              <option value="07" {{TIME_HOURS_07}}>07</option>\n              <option value="08" {{TIME_HOURS_08}}>08</option>\n              <option value="09" {{TIME_HOURS_09}}>09</option>\n              <option value="10" {{TIME_HOURS_10}}>10</option>\n              <option value="11" {{TIME_HOURS_11}}>11</option>\n              <option value="12" {{TIME_HOURS_12}}>12</option>\n              <option value="13" {{TIME_HOURS_13}}>13</option>\n              <option value="14" {{TIME_HOURS_14}}>14</option>\n              <option value="15" {{TIME_HOURS_15}}>15</option>\n              <option value="16" {{TIME_HOURS_16}}>16</option>\n              <option value="17" {{TIME_HOURS_17}}>17</option>\n              <option value="18" {{TIME_HOURS_18}}>18</option>\n              <option value="19" {{TIME_HOURS_19}}>19</option>\n              <option value="20" {{TIME_HOURS_20}}>20</option>\n              <option value="21" {{TIME_HOURS_21}}>21</option>\n              <option value="22" {{TIME_HOURS_22}}>22</option>\n              <option value="23" {{TIME_HOURS_23}}>23</option>\n            </select>\n            <span class="time-separator">:</span>\n            <select class="homie-select slot-time-minutes" data-action="update-time-minutes" data-item-id="{{ITEM_ID}}">\n              <option value="00" {{TIME_MINUTES_00}}>00</option>\n              <option value="05" {{TIME_MINUTES_05}}>05</option>\n              <option value="10" {{TIME_MINUTES_10}}>10</option>\n              <option value="15" {{TIME_MINUTES_15}}>15</option>\n              <option value="20" {{TIME_MINUTES_20}}>20</option>\n              <option value="25" {{TIME_MINUTES_25}}>25</option>\n              <option value="30" {{TIME_MINUTES_30}}>30</option>\n              <option value="35" {{TIME_MINUTES_35}}>35</option>\n              <option value="40" {{TIME_MINUTES_40}}>40</option>\n              <option value="45" {{TIME_MINUTES_45}}>45</option>\n              <option value="50" {{TIME_MINUTES_50}}>50</option>\n              <option value="55" {{TIME_MINUTES_55}}>55</option>\n            </select>\n          </div>\n        </div>\n      </div>\n      <div class="slot-duration">\n        <ha-icon icon="mdi:timer-outline"></ha-icon>\n        <!-- SHARED:duration-selector -->\n<!-- Duration Selector (minutes) - slider + number input -->\n<div class="duration-selector-wrapper">\n  <input \n    type="range" \n    class="duration-slider" \n    data-action="update-duration-slider"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    value="{{DURATION_VALUE}}"\n  />\n  <input \n    type="number" \n    class="duration-input homie-input" \n    data-action="update-duration"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    step="1"\n    value="{{DURATION_VALUE}}"\n  />\n</div>\n<!-- END:duration-selector -->\n      </div>\n      \n      <!-- SHARED:weekday-selector -->\n<!-- Weekday Selection Component (universal - without popup-field) -->\n<div class="weekday-mode-selector">\n  <button type="button" class="weekday-mode-btn active" data-mode="everyday">Everyday</button>\n  <button type="button" class="weekday-mode-btn" data-mode="weekdays">Weekdays</button>\n  <button type="button" class="weekday-mode-btn" data-mode="custom">Custom</button>\n</div>\n<div class="popup-weekdays hidden" id="popup-weekdays-custom">\n  <div class="popup-weekday" data-day="0">Mon</div>\n  <div class="popup-weekday" data-day="1">Tue</div>\n  <div class="popup-weekday" data-day="2">Wed</div>\n  <div class="popup-weekday" data-day="3">Thu</div>\n  <div class="popup-weekday" data-day="4">Fri</div>\n  <div class="popup-weekday" data-day="5">Sat</div>\n  <div class="popup-weekday" data-day="6">Sun</div>\n</div>\n<!-- END:weekday-selector -->\n      \n      <button class="slot-delete" data-action="delete-item">\n        <ha-icon icon="mdi:delete"></ha-icon>\n        <span>Remove Slot {{SLOT_NUMBER}}</span>\n      </button>\n    </div>\n  </div>\n</template>\n`;
+    this._htmlTemplate = `  <!-- Main Header -->\n  <div class="main-header">\n    <div class="header-left">\n      <div class="header-icon {{ENABLED_CLASS}}" data-action="toggle-enabled" title="Toggle scheduler">\n        <ha-icon icon="mdi:calendar-clock"></ha-icon>\n        <!-- <ha-icon icon="{{ICON}}"></ha-icon> -->\n      </div>\n      <div class="header-text">\n        <div class="header-title {{HEADER_TITLE_CLASS}}">\n          {{TITLE}}\n        </div>\n        <div class="header-status">{{STATUS_TEXT}}</div>\n      </div>\n    </div>\n  </div>\n  \n  <!-- Slots List (hidden when 0 slots) -->\n  <div class="slots-container{{SLOTS_CONTAINER_CLASS}}">\n    {{ITEMS_CONTENT}}\n  </div>\n  \n  <!-- Add Slot Button -->\n  <button class="button-outline" data-action="open-add-popup">\n    Add Schedule Slot\n  </button>\n  \n  <!-- Add Slot Popup -->\n  <div class="popup-overlay" id="add-popup" style="display: none;">\n    <div class="popup-content">\n      <div class="popup-header">\n        <ha-icon icon="mdi:power"></ha-icon>\n        <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">\n          <span class="popup-title">Add Schedule Slot</span>\n          <div style="font-size: 12px; color: var(--secondary-text-color, #757575);">\n            for {{ENTITY_NAME}}\n          </div>\n        </div>\n        <button class="popup-close" data-action="close-popup">\n          <ha-icon icon="mdi:close"></ha-icon>\n        </button>\n      </div>\n      \n      <div class="popup-body">\n        <div id="add-popup-error" class="popup-error" style="display: none;"></div>\n        <!-- Title Input -->\n        <div class="popup-field">\n          <label>\n            <ha-icon icon="mdi:label-outline"></ha-icon>\n            <span>Title (optional)</span>\n          </label>\n          <input type="text" class="homie-input" id="popup-title" placeholder="e.g. Morning heating">\n        </div>\n        \n        <!-- Time Input -->\n        <div class="popup-field">\n          <label>\n            <ha-icon icon="mdi:clock-outline"></ha-icon>\n            <span>Start Time</span>\n          </label>\n          <div class="time-selects">\n            <select class="homie-select popup-time-hours" id="popup-time-hours">\n              <option value="00">00</option>\n              <option value="01">01</option>\n              <option value="02">02</option>\n              <option value="03">03</option>\n              <option value="04">04</option>\n              <option value="05">05</option>\n              <option value="06">06</option>\n              <option value="07">07</option>\n              <option value="08" selected>08</option>\n              <option value="09">09</option>\n              <option value="10">10</option>\n              <option value="11">11</option>\n              <option value="12">12</option>\n              <option value="13">13</option>\n              <option value="14">14</option>\n              <option value="15">15</option>\n              <option value="16">16</option>\n              <option value="17">17</option>\n              <option value="18">18</option>\n              <option value="19">19</option>\n              <option value="20">20</option>\n              <option value="21">21</option>\n              <option value="22">22</option>\n              <option value="23">23</option>\n            </select>\n            <span class="time-separator">:</span>\n            <select class="homie-select popup-time-minutes" id="popup-time-minutes">\n              <option value="00" selected>00</option>\n              <option value="05">05</option>\n              <option value="10">10</option>\n              <option value="15">15</option>\n              <option value="20">20</option>\n              <option value="25">25</option>\n              <option value="30">30</option>\n              <option value="35">35</option>\n              <option value="40">40</option>\n              <option value="45">45</option>\n              <option value="50">50</option>\n              <option value="55">55</option>\n            </select>\n          </div>\n        </div>\n        \n        <!-- Duration Selector -->\n        <div class="popup-field">\n          <label>\n            <ha-icon icon="mdi:timer-outline"></ha-icon>\n            <span>Duration (minutes)</span>\n          </label>\n          <!-- SHARED:selector-duration-mins -->\n<!-- Duration Selector (minutes) - slider + number input -->\n<div class="duration-selector-wrapper">\n  <input \n    type="range" \n    class="duration-slider" \n    data-action="update-duration-slider"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    value="{{DURATION_VALUE}}"\n  />\n  <input \n    type="number" \n    class="duration-input homie-input" \n    data-action="update-duration"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    step="1"\n    value="{{DURATION_VALUE}}"\n  />\n</div>\n<!-- END:selector-duration-mins -->\n        </div>\n        \n        <!-- Weekday Selector -->\n        <div class="popup-field">\n          <label>\n            <ha-icon icon="mdi:calendar"></ha-icon>\n            <span>Days of Week</span>\n          </label>\n          <!-- SHARED:weekday-selector -->\n<!-- Weekday Selection Component (universal - without popup-field) -->\n<div class="weekday-mode-selector">\n  <button type="button" class="weekday-mode-btn active" data-mode="everyday">Everyday</button>\n  <button type="button" class="weekday-mode-btn" data-mode="weekdays">Weekdays</button>\n  <button type="button" class="weekday-mode-btn" data-mode="custom">Custom</button>\n</div>\n<div class="popup-weekdays hidden" id="popup-weekdays-custom">\n  <div class="popup-weekday" data-day="0">Mon</div>\n  <div class="popup-weekday" data-day="1">Tue</div>\n  <div class="popup-weekday" data-day="2">Wed</div>\n  <div class="popup-weekday" data-day="3">Thu</div>\n  <div class="popup-weekday" data-day="4">Fri</div>\n  <div class="popup-weekday" data-day="5">Sat</div>\n  <div class="popup-weekday" data-day="6">Sun</div>\n</div>\n<!-- END:weekday-selector -->\n        </div>\n      </div>\n      \n      <div class="popup-footer">\n        <button class="popup-button cancel" data-action="close-popup">Cancel</button>\n        <button class="popup-button save" data-action="save-slot">Save</button>\n      </div>\n    </div>\n  </div>\n\n<!-- Slot Item Template -->\n<template id="slot-item-template">\n  <div class="slot-card {{DISABLED_CLASS}}" data-item-id="{{ITEM_ID}}">\n    <div class="slot-header">\n      <div class="slot-icon {{ICON_CLASS}}" data-action="toggle-item" title="Toggle slot">\n        <ha-icon icon="mdi:power"></ha-icon>\n      </div>\n      <div class="slot-info">\n        <div class="slot-name">{{SLOT_NAME}}</div>\n        <div class="slot-status">{{SLOT_STATUS}}</div>\n      </div>\n    </div>\n    <button class="slot-expand" data-action="toggle-expand" title="Expand/collapse details">\n      <ha-icon icon="mdi:chevron-down"></ha-icon>\n    </button>\n    \n    <div class="slot-expandable">\n      <div class="slot-error-message" data-slot-error style="display: none;"></div>\n      <div class="slot-details">\n        <div class="slot-title">\n          <ha-icon icon="mdi:label-outline"></ha-icon>\n          <input type="text" class="homie-input slot-title-input" data-action="update-title" data-item-id="{{ITEM_ID}}" value="{{SLOT_TITLE}}" placeholder="Slot name">\n        </div>\n        <div class="slot-time">\n          <ha-icon icon="mdi:clock-outline"></ha-icon>\n          <div class="time-selects">\n            <select class="homie-select slot-time-hours" data-action="update-time-hours" data-item-id="{{ITEM_ID}}">\n              <option value="00" {{TIME_HOURS_00}}>00</option>\n              <option value="01" {{TIME_HOURS_01}}>01</option>\n              <option value="02" {{TIME_HOURS_02}}>02</option>\n              <option value="03" {{TIME_HOURS_03}}>03</option>\n              <option value="04" {{TIME_HOURS_04}}>04</option>\n              <option value="05" {{TIME_HOURS_05}}>05</option>\n              <option value="06" {{TIME_HOURS_06}}>06</option>\n              <option value="07" {{TIME_HOURS_07}}>07</option>\n              <option value="08" {{TIME_HOURS_08}}>08</option>\n              <option value="09" {{TIME_HOURS_09}}>09</option>\n              <option value="10" {{TIME_HOURS_10}}>10</option>\n              <option value="11" {{TIME_HOURS_11}}>11</option>\n              <option value="12" {{TIME_HOURS_12}}>12</option>\n              <option value="13" {{TIME_HOURS_13}}>13</option>\n              <option value="14" {{TIME_HOURS_14}}>14</option>\n              <option value="15" {{TIME_HOURS_15}}>15</option>\n              <option value="16" {{TIME_HOURS_16}}>16</option>\n              <option value="17" {{TIME_HOURS_17}}>17</option>\n              <option value="18" {{TIME_HOURS_18}}>18</option>\n              <option value="19" {{TIME_HOURS_19}}>19</option>\n              <option value="20" {{TIME_HOURS_20}}>20</option>\n              <option value="21" {{TIME_HOURS_21}}>21</option>\n              <option value="22" {{TIME_HOURS_22}}>22</option>\n              <option value="23" {{TIME_HOURS_23}}>23</option>\n            </select>\n            <span class="time-separator">:</span>\n            <select class="homie-select slot-time-minutes" data-action="update-time-minutes" data-item-id="{{ITEM_ID}}">\n              <option value="00" {{TIME_MINUTES_00}}>00</option>\n              <option value="05" {{TIME_MINUTES_05}}>05</option>\n              <option value="10" {{TIME_MINUTES_10}}>10</option>\n              <option value="15" {{TIME_MINUTES_15}}>15</option>\n              <option value="20" {{TIME_MINUTES_20}}>20</option>\n              <option value="25" {{TIME_MINUTES_25}}>25</option>\n              <option value="30" {{TIME_MINUTES_30}}>30</option>\n              <option value="35" {{TIME_MINUTES_35}}>35</option>\n              <option value="40" {{TIME_MINUTES_40}}>40</option>\n              <option value="45" {{TIME_MINUTES_45}}>45</option>\n              <option value="50" {{TIME_MINUTES_50}}>50</option>\n              <option value="55" {{TIME_MINUTES_55}}>55</option>\n            </select>\n          </div>\n        </div>\n      </div>\n      <div class="slot-duration">\n        <ha-icon icon="mdi:timer-outline"></ha-icon>\n        <!-- SHARED:selector-duration-mins -->\n<!-- Duration Selector (minutes) - slider + number input -->\n<div class="duration-selector-wrapper">\n  <input \n    type="range" \n    class="duration-slider" \n    data-action="update-duration-slider"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    value="{{DURATION_VALUE}}"\n  />\n  <input \n    type="number" \n    class="duration-input homie-input" \n    data-action="update-duration"\n    data-item-id="{{ITEM_ID}}"\n    min="{{DURATION_MIN}}"\n    max="{{DURATION_MAX}}"\n    step="1"\n    value="{{DURATION_VALUE}}"\n  />\n</div>\n<!-- END:selector-duration-mins -->\n      </div>\n      \n      <!-- SHARED:weekday-selector -->\n<!-- Weekday Selection Component (universal - without popup-field) -->\n<div class="weekday-mode-selector">\n  <button type="button" class="weekday-mode-btn active" data-mode="everyday">Everyday</button>\n  <button type="button" class="weekday-mode-btn" data-mode="weekdays">Weekdays</button>\n  <button type="button" class="weekday-mode-btn" data-mode="custom">Custom</button>\n</div>\n<div class="popup-weekdays hidden" id="popup-weekdays-custom">\n  <div class="popup-weekday" data-day="0">Mon</div>\n  <div class="popup-weekday" data-day="1">Tue</div>\n  <div class="popup-weekday" data-day="2">Wed</div>\n  <div class="popup-weekday" data-day="3">Thu</div>\n  <div class="popup-weekday" data-day="4">Fri</div>\n  <div class="popup-weekday" data-day="5">Sat</div>\n  <div class="popup-weekday" data-day="6">Sun</div>\n</div>\n<!-- END:weekday-selector -->\n      \n      <button class="slot-delete" data-action="delete-item">\n        <ha-icon icon="mdi:delete"></ha-icon>\n        <span>Remove Slot {{SLOT_NUMBER}}</span>\n      </button>\n    </div>\n  </div>\n</template>\n`;
     return this._htmlTemplate;
   }
 
@@ -3535,7 +3948,7 @@ class HomieBoilerScheduleSlotsCard extends HTMLElement {
 
     // Load styles and MDI font (for dev/preview only)
     // In production, HA provides ha-icon component with built-in MDI support
-    const styleContent = `/**\n * Shared styles for slot-form-fields.html (Add Slot popup + Edit Slot).\n * Uses :host CSS variables from the card (--_accent, --_text, etc.).\n */\n\n.popup-field { margin-bottom: 20px; }\n.popup-field:last-child { margin-bottom: 0; }\n\n/* Shared form (add popup + edit slot) - one structure, same styles */\n.slot-form .slot-form-field { margin-bottom: 20px; }\n.slot-form .slot-form-field:last-child { margin-bottom: 0; }\n.slot-form .slot-form-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  margin-bottom: 8px;\n}\n.slot-form .slot-form-label ha-icon { --mdc-icon-size: 22px; color: var(--_accent); }\n\n/* Mode, Fan, Temp in one row */\n.slot-form-row {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 12px 16px;\n  align-items: flex-end;\n  margin-bottom: 20px;\n}\n.slot-form-row .slot-form-field {\n  flex: 1;\n  min-width: 0;\n  margin-bottom: 0;\n}\n.slot-form-row-mode-fan-temp .slot-form-field-mode,\n.slot-form-row-mode-fan-temp .slot-form-field-fan,\n.slot-form-row-mode-fan-temp .slot-form-field-temp {\n  flex: 1 1 0;\n  min-width: 0;\n}\n/* stretch selects and inputs to full column width */\n.slot-form-row-mode-fan-temp .slot-form-field select,\n.slot-form-row-mode-fan-temp .slot-form-field input[type="number"] {\n  width: 100%;\n  box-sizing: border-box;\n  display: block;\n}\n\n.slot-form-field-mode .slot-form-mode-select { width: 100%; box-sizing: border-box; }\n.slot-form-mode-warning {\n  margin-top: 8px;\n  font-size: 12px;\n  color: var(--_error-color);\n  line-height: 1.4;\n}\n.slot-form-mode-warning:empty { display: none; }\n\n.slot-form-entities-wrap { position: relative; }\n.slot-form-entities-trigger {\n  margin-top: 8px;\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  min-height: 40px;\n  padding: 6px 12px;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_bg-select);\n  cursor: pointer;\n  transition: border-color 0.2s, box-shadow 0.2s;\n}\n.slot-form-entities-trigger:hover,\n.slot-form-entities-trigger.open {\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.slot-form-entities-chips {\n  flex: 1;\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n  align-items: center;\n  min-height: 24px;\n}\n.popup-entity-chip {\n  display: inline-flex;\n  align-items: center;\n  padding: 2px 8px;\n  border-radius: var(--_radius-small);\n  background: var(--_secondary-bg);\n  border: 1px solid var(--_divider);\n  font-size: 12px;\n  color: var(--_text);\n  white-space: nowrap;\n}\n.slot-form-entities-caret {\n  --mdc-icon-size: 20px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n  transition: transform 0.2s;\n}\n.slot-form-entities-trigger.open .slot-form-entities-caret {\n  transform: rotate(180deg);\n}\n.slot-form-entities-dropdown {\n  display: none;\n  position: absolute;\n  left: 0;\n  right: 0;\n  top: 100%;\n  margin-top: 4px;\n  z-index: 10;\n  flex-direction: column;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_popup-bg);\n  box-shadow: var(--_popup-box-shadow);\n  max-height: 220px;\n  overflow: hidden;\n}\n.slot-form-entities-dropdown.open {\n  display: flex;\n}\n.slot-form-entities-select-all-row {\n  border-bottom: 1px solid var(--_divider);\n  flex-shrink: 0;\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  padding: 10px 16px;\n  cursor: pointer;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.slot-form-entity-row:hover {\n  background: var(--_secondary-bg);\n}\n.entities-selector-row.entities-selector-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.entities-selector-row.entities-selector-row-unsupported .entities-selector-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n.slot-form-entities-dropdown .entities-selector-list {\n  overflow-y: auto;\n  overflow-x: hidden;\n  display: flex;\n  flex-direction: column;\n  flex: 1;\n  min-height: 0;\n}\n.slot-form-entities-dropdown .entities-selector-row {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  padding: 10px 16px;\n  cursor: pointer;\n  border-bottom: 1px solid var(--_divider);\n  transition: background 0.2s;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.popup-entities-dropdown .entities-selector-row:last-child {\n  border-bottom: none;\n}\n.popup-entities-dropdown .entities-selector-row:hover {\n  background: var(--_secondary-bg);\n}\n.popup-entities-dropdown .entities-selector-row.hidden {\n  display: none;\n}\n.popup-entities-dropdown .entities-selector-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.popup-entities-dropdown .entities-selector-row-unsupported .entities-selector-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n.popup-entity-row input[type="checkbox"] {\n  width: 18px;\n  height: 18px;\n  margin: 0;\n  cursor: pointer;\n  accent-color: var(--_accent);\n  flex-shrink: 0;\n}\n.popup-entity-row ha-icon {\n  --mdc-icon-size: 22px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n}\n.popup-entity-name {\n  flex: 1;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.popup-entities-list label {\n  cursor: pointer;\n}\n.popup-field label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  margin-bottom: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n}\n.popup-field label ha-icon { --mdc-icon-size: 24px; color: var(--_accent); }\n\n/* HA-style row: label left, control (e.g. ha-switch) right */\n.popup-field-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 8px 0;\n  gap: 16px;\n  cursor: pointer;\n}\n.popup-field-row-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  cursor: pointer;\n  margin: 0;\n  flex: 1;\n}\n.popup-field-row-label ha-icon {\n  --mdc-icon-size: 24px;\n  color: var(--_accent);\n}\n.popup-duration-row ha-switch,\n.slot-form-duration-enabled {\n  flex-shrink: 0;\n}\n.slot-form-duration-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 8px 0;\n  gap: 16px;\n  cursor: pointer;\n}\n.slot-form-field-row-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  cursor: pointer;\n  margin: 0;\n  flex: 1;\n}\n.slot-form-field-row-label ha-icon {\n  --mdc-icon-size: 24px;\n  color: var(--_accent);\n}\n/* Slot edit: same vertical layout as add (label on new line, then control) */\n.slot-expandable .slot-form .slot-form-field {\n  display: block;\n  font-size: 14px;\n}\n.slot-expandable .slot-form-title-input {\n  width: 100%;\n  box-sizing: border-box;\n}\n\n/**\n * Boiler Scheduler Card - Styles\n * All variables in :host; common/slot/popup/duration use them (overridable via --homie-slots-*).\n */\n\n:host {\n  display: block;\n  padding: 0;\n  overflow: hidden;\n  background: transparent;\n  --circular-button-size: var(--mdc-icon-button-size, 40px);\n\n  /* Card (header, slot card) */\n  --_accent: var(--homie-slots-accent, var(--primary-color, #03a9f4));\n  --_bg: var(--homie-slots-bg, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_radius: var(--homie-slots-radius, var(--ha-card-border-radius, 8px));\n  --_shadow: var(--homie-slots-shadow, var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1)));\n  --_text: var(--homie-slots-text, var(--primary-text-color, #212121));\n  --_text-secondary: var(--homie-slots-text-secondary, var(--secondary-text-color, #757575));\n  --_text-on-accent: var(--homie-slots-text-on-accent, var(--text-primary-on-background, #ffffff));\n  --_disabled-color: var(--homie-slots-disabled, var(--disabled-color, var(--disabled-text-color, #9e9e9e)));\n\n  /* Select */\n  --_bg-select: var(--homie-slots-bg-select, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_divider-select: var(--homie-slots-divider-select, var(--divider-color, rgba(0, 0, 0, 0.12)));\n  --_text-select: var(--homie-slots-text-select, var(--primary-text-color, #212121));\n  --_radius-select: var(--homie-slots-radius-select, var(--mdc-shape-small, 4px));\n  --_focus-ring: var(--homie-slots-focus-ring, 0 0 0 2px rgba(3, 169, 244, 0.1));\n\n  /* Input, buttons, slot, weekday, duration */\n  --_padding-input-vertical: var(--homie-slots-padding-input-vertical, var(--mdc-shape-small, 4px));\n  --_padding-input-horizontal: var(--homie-slots-padding-input-horizontal, var(--mdc-shape-small, 8px));\n  --_border-input: var(--homie-slots-border-input, 1px solid var(--_divider));\n  --_radius-input: var(--homie-slots-radius-input, var(--_radius-small));\n  --_divider: var(--homie-slots-divider, var(--divider-color, rgba(0, 0, 0, 0.12)));\n  --_radius-small: var(--homie-slots-radius-small, var(--mdc-shape-small, 4px));\n  --_radius-medium: var(--homie-slots-radius-medium, var(--mdc-shape-medium, 8px));\n  --_secondary-bg: var(--homie-slots-secondary-bg, var(--secondary-background-color, #f5f5f5));\n  --_error-color: var(--homie-slots-error-color, var(--error-color, #f44336));\n\n  /* Button outline */\n  --_button-outline-padding: var(--homie-slots-button-outline-padding, var(--mdc-button-horizontal-padding, 16px));\n  --_button-outline-margin-top: var(--homie-slots-button-outline-margin-top, var(--mdc-layout-grid-gutter, 12px));\n  --_button-outline-radius: var(--homie-slots-button-outline-radius, var(--_radius-medium));\n  --_button-outline-bg: var(--homie-slots-button-outline-bg, transparent);\n  --_button-outline-border: var(--homie-slots-button-outline-border, 2px solid var(--_accent));\n  --_button-outline-color: var(--homie-slots-button-outline-color, var(--_accent));\n  --_button-outline-font-size: var(--homie-slots-button-outline-font-size, var(--mdc-typography-button-font-size, 14px));\n  --_button-outline-font-weight: var(--homie-slots-button-outline-font-weight, var(--mdc-typography-button-font-weight, 900));\n  --_button-outline-letter-spacing: var(--homie-slots-button-outline-letter-spacing, var(--mdc-typography-button-letter-spacing, 0em));\n  --_button-outline-min-height: var(--homie-slots-button-outline-min-height, var(--mdc-button-height, 36px));\n  --_button-outline-hover-shadow: var(--homie-slots-button-outline-hover-shadow, 0 2px 8px rgba(3, 169, 244, 0.3));\n  --_button-outline-active-transform: var(--homie-slots-button-outline-active-transform, scale(0.98));\n  --_button-outline-active-shadow: var(--homie-slots-button-outline-active-shadow, 0 1px 4px rgba(3, 169, 244, 0.2));\n\n  /* Popup */\n  --_popup-bg: var(--homie-slots-popup-background, var(--ha-dialog-background, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)))));\n  --_popup-color: var(--homie-slots-popup-color, var(--primary-text-color, #212121));\n  --_popup-backdrop-filter: var(--homie-slots-popup-backdrop-filter, var(--ha-card-backdrop-filter, none));\n  --_popup-box-shadow: var(--homie-slots-popup-box-shadow, var(--ha-card-box-shadow, none));\n  --_popup-border-radius: var(--homie-slots-popup-border-radius, var(--ha-card-border-radius, 16px));\n  --_popup-width: var(--mdc-dialog-width, 90%);\n  --_popup-max-width: var(--mdc-dialog-max-width, 400px);\n  --_popup-min-width: var(--mdc-dialog-min-width, 0px);\n  --_popup-max-height: var(--mdc-dialog-max-height, 90vh);\n\n  color: var(--_text);\n}\n\n/* === Common / slot / popup / duration (use :host vars above) === */\n.homie-select {\n  background: var(--_bg-select);\n  border: 1px solid var(--_divider-select);\n  border-radius: var(--_radius-select);\n  color: var(--_text-select);\n  font-size: 14px;\n  font-family: inherit;\n  cursor: pointer;\n  appearance: none;\n  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23999999' d='M6 9L1 4h10z'/%3E%3C/svg%3E");\n  background-repeat: no-repeat;\n  background-position: right var(--mdc-shape-small, 6px) center;\n  background-size: 12px;\n  transition: border-color 0.2s, box-shadow 0.2s;\n  padding: var(--_padding-input-vertical) var(--_padding-input-horizontal);\n  padding-right: calc(var(--_padding-input-horizontal) * 2 + 12px);\n}\n@media (prefers-color-scheme: dark) {\n  .homie-select {\n    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 9L1 4h10z'/%3E%3C/svg%3E");\n  }\n}\n.homie-select:focus {\n  outline: none;\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.homie-select option {\n  background: var(--_bg-select);\n  color: var(--_text-select);\n}\n.homie-input {\n  width: 100%;\n  background: var(--_bg);\n  border: var(--_border-input);\n  border-radius: var(--_radius-input);\n  color: var(--_text);\n  font-size: 14px;\n  font-family: inherit;\n  padding: var(--_padding-input-vertical) var(--_padding-input-horizontal);\n  transition: border-color 0.2s, box-shadow 0.2s;\n  box-sizing: border-box;\n}\n.homie-input:focus {\n  outline: none;\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.homie-input::placeholder {\n  color: var(--_text-secondary);\n  opacity: 0.7;\n}\n.button-outline {\n  width: 100%;\n  padding: var(--_button-outline-padding) var(--_button-outline-padding);\n  margin-top: var(--_button-outline-margin-top);\n  border-radius: var(--_button-outline-radius);\n  background: var(--_button-outline-bg);\n  border: var(--_button-outline-border);\n  color: var(--_button-outline-color);\n  font-size: var(--_button-outline-font-size);\n  font-weight: var(--_button-outline-font-weight);\n  letter-spacing: var(--_button-outline-letter-spacing);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n  min-height: var(--_button-outline-min-height);\n}\n.button-outline:hover {\n  background: var(--_accent);\n  color: var(--_text-on-accent);\n  box-shadow: var(--_button-outline-hover-shadow);\n}\n.button-outline:active {\n  transform: var(--_button-outline-active-transform);\n  box-shadow: var(--_button-outline-active-shadow);\n}\n.slot-expandable {\n  max-height: 0;\n  overflow: hidden;\n  transition: max-height 0.3s ease-out;\n}\n.slot-card.expanded .slot-expandable {\n  max-height: 500px;\n  transition: max-height 0.3s ease-in;\n  padding: var(--ha-card-header-padding, 16px) 0;\n  display: flex;\n  flex-direction: column;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n}\n.slot-details {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 16px);\n  margin-bottom: var(--mdc-layout-grid-gutter, 12px);\n  flex-wrap: wrap;\n}\n.slot-time, .slot-duration {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n}\n.slot-time ha-icon, .slot-duration ha-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n}\n.slot-time .time-picker-separator {\n  color: var(--_text);\n}\n.slot-delete {\n  width: 100%;\n  padding: var(--mdc-shape-small, 10px);\n  margin-top: var(--mdc-layout-grid-gutter, 12px);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  border: 1px solid var(--_divider);\n  color: var(--_error-color);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: var(--mdc-layout-grid-gutter, 8px);\n  transition: all 0.2s;\n  font-size: 14px;\n  font-weight: 500;\n  font-family: inherit;\n}\n.slot-delete:active { transform: scale(0.98); }\n.slot-delete ha-icon { --mdc-icon-size: 22px; }\n.empty-state {\n  text-align: center;\n  padding: 48px 16px;\n  color: var(--_text-secondary);\n}\n.empty-state ha-icon { --mdc-icon-size: 48px; opacity: 0.3; margin-bottom: 16px; }\n.empty-text { font-size: 14px; line-height: 20px; }\n.popup-overlay {\n  position: fixed;\n  top: 0; left: 0; right: 0; bottom: 0;\n  background: rgba(0, 0, 0, 0.5);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  z-index: 1000;\n  animation: fadeIn 0.2s;\n}\n@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }\n.popup-header {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  padding: var(--ha-card-header-padding, 20px);\n  border-bottom: 1px solid var(--_divider);\n}\n.popup-header ha-icon { --mdc-icon-size: 28px; color: var(--_accent); }\n.popup-title { flex: 1; font-size: 18px; font-weight: 500; color: var(--_text); }\n.popup-close {\n  width: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  height: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  min-width: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  min-height: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  border-radius: 50%;\n  background: transparent;\n  border: none;\n  color: var(--_text-secondary);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n}\n.popup-close ha-icon { --mdc-icon-size: 24px; }\n.popup-body { padding: var(--ha-card-header-padding, 20px); }\n.popup-error {\n  color: var(--error-color, #b00020);\n  font-size: 13px;\n  margin-bottom: 12px;\n  display: block;\n}\n.slot-error-message {\n  color: var(--error-color, #b00020);\n  font-size: 13px;\n  margin-bottom: 8px;\n}\n.popup-field { margin-bottom: 20px; }\n.popup-field:last-child { margin-bottom: 0; }\n.popup-field label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  margin-bottom: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n}\n.popup-field label ha-icon { --mdc-icon-size: 24px; color: var(--_accent); }\n.popup-footer {\n  display: flex;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  padding: var(--ha-card-header-padding, 20px);\n  border-top: 1px solid var(--_divider);\n}\n.popup-button {\n  flex: 1;\n  padding: var(--mdc-shape-small, 12px) var(--mdc-shape-medium, 24px);\n  border: none;\n  border-radius: var(--_radius-medium);\n  font-size: 14px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  font-family: inherit;\n}\n.popup-button.cancel { background: var(--_secondary-bg); color: var(--_text); }\n.popup-button.save { background: var(--_accent); color: var(--_text-on-accent); }\n.popup-button:active { transform: scale(0.98); }\n.time-selects { display: flex; align-items: center; gap: 8px; width: 100%; }\n.popup-time-hours, .popup-time-minutes { flex: 1; }\n.time-separator { font-size: 18px; font-weight: 500; color: var(--_text-secondary); user-select: none; }\n.slot-time .time-selects { display: flex; align-items: center; gap: 6px; width: auto; }\n.slot-time .time-separator { font-size: 14px; color: var(--_text); }\n.weekday-mode-selector { display: flex; gap: 8px; margin-bottom: 12px; }\n.weekday-mode-btn {\n  flex: 1;\n  padding: var(--mdc-shape-small, 10px);\n  border: 2px solid var(--_divider);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  color: var(--_text-secondary);\n  text-align: center;\n  font-size: 13px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n  font-family: inherit;\n}\n.weekday-mode-btn.active, .weekday-mode-btn:hover {\n  background: var(--_accent);\n  border-color: var(--_accent);\n  color: var(--_text-on-accent);\n}\n.weekday-mode-btn:hover { opacity: 0.8; }\n.popup-weekdays { display: flex; gap: 8px; flex-wrap: wrap; }\n.popup-weekdays.hidden { display: none; }\n.popup-weekday {\n  flex: 1;\n  min-width: 40px;\n  padding: var(--mdc-shape-small, 10px);\n  border: 2px solid var(--_divider);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  color: var(--_text-secondary);\n  text-align: center;\n  font-size: 13px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n}\n.popup-weekday.active {\n  background: var(--_accent);\n  border-color: var(--_accent);\n  color: var(--_text-on-accent);\n}\n@media (max-width: 480px) {\n  .popup-weekday { min-width: 35px; padding: 8px; font-size: 12px; }\n}\n.duration-selector-wrapper {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  width: 100%;\n}\n.duration-slider {\n  flex: 1;\n  height: 4px;\n  border-radius: 2px;\n  background: var(--_divider);\n  outline: none;\n  -webkit-appearance: none;\n  appearance: none;\n}\n.duration-slider::-webkit-slider-thumb {\n  -webkit-appearance: none;\n  appearance: none;\n  width: 20px;\n  height: 20px;\n  border-radius: 50%;\n  background: var(--_accent);\n  cursor: pointer;\n  border: 2px solid var(--_bg);\n  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);\n  transition: all 0.2s;\n}\n.duration-slider::-webkit-slider-thumb:hover {\n  transform: scale(1.1);\n  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);\n}\n.duration-slider::-moz-range-thumb {\n  width: 20px;\n  height: 20px;\n  border-radius: 50%;\n  background: var(--_accent);\n  cursor: pointer;\n  border: 2px solid var(--_bg);\n  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);\n  transition: all 0.2s;\n}\n.duration-slider::-moz-range-thumb:hover {\n  transform: scale(1.1);\n  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);\n}\n.duration-input {\n  width: 80px;\n  min-width: 80px;\n  text-align: center;\n}\n\n/* ========================================\n   MAIN HEADER\n   ======================================== */\n\n.main-header {\n  display: flex;\n  justify-content: space-between;\n  align-items: center;\n  padding: var(--ha-card-header-padding, 16px);\n  background: var(--_bg);\n  border-radius: var(--_radius);\n  box-shadow: var(--_shadow);\n  backdrop-filter: var(--ha-card-backdrop-filter, blur(10px));\n}\n\n.main-header:not(:last-child) {\n  margin-bottom: var(--mdc-layout-grid-gutter, 12px);\n}\n\n.header-left {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  flex: 1;\n}\n\n.header-icon {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--_accent);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  color: var(--_text-on-accent);\n  cursor: pointer;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.header-icon:active {\n  transform: scale(0.95);\n}\n\n.header-icon.disabled {\n  opacity: 0.5;\n  background: var(--_disabled-color);\n}\n\n.header-icon.enabled {\n  background: var(--_accent);\n  opacity: 1;\n}\n\n.header-icon ha-icon {\n  --mdc-icon-size: 28px;\n}\n\n.header-text {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n\n.header-title {\n  font-size: 16px;\n  font-weight: 500;\n  color: var(--primary-text-color, #212121);\n  line-height: 22px;\n}\n\n.header-title--hidden {\n  display: none;\n}\n\n.header-status {\n  font-size: 14px;\n  color: var(--secondary-text-color, #757575);\n  line-height: 20px;\n}\n\n.add-button {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--primary-color, #03a9f4);\n  border: none;\n  color: var(--text-primary-on-background, #ffffff);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.add-button:active {\n  transform: scale(0.95);\n}\n\n.add-button ha-icon {\n  --mdc-icon-size: 28px;\n}\n\n/* ========================================\n   ADD SLOT BUTTON\n   ======================================== */\n\n/* Button outline style moved to shared/assets/homie-css.css */\n\n/* ========================================\n   SLOTS CONTAINER\n   ======================================== */\n\n.slots-container {\n  display: flex;\n  flex-direction: column;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n}\n\n.slots-container--empty {\n  display: none;\n}\n\n/* ========================================\n   SLOT CARD (Blue Card Design)\n   ======================================== */\n\n.slot-card {\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  border-radius: var(--ha-card-border-radius, var(--mdc-shape-medium, 8px));\n  padding: var(--ha-card-header-padding, 16px) var(--ha-card-header-padding, 16px) 0 var(--ha-card-header-padding, 16px);\n  color: var(--primary-text-color, #212121);\n  position: relative;\n  box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));\n  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;\n  backdrop-filter: var(--ha-card-backdrop-filter, blur(10px));\n}\n\n/* Active slot (enabled) - same background as header */\n.slot-card:not(.disabled) {\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n}\n\n.slot-card.disabled {\n  opacity: 0.6;\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.5)));\n}\n\n.slot-header {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  margin-bottom: 0;\n}\n\n.slot-icon {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--primary-color, #03a9f4);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  cursor: pointer;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n  color: var(--text-primary-on-background, #ffffff);\n}\n\n.slot-icon:active {\n  transform: scale(0.95);\n}\n\n.slot-icon.enabled {\n  background: var(--primary-color, #03a9f4);\n  opacity: 1;\n}\n\n.slot-icon.disabled {\n  background: var(--disabled-color, var(--disabled-text-color, #9e9e9e));\n  opacity: 0.6;\n}\n\n.slot-icon ha-icon {\n  --mdc-icon-size: 24px;\n}\n\n.slot-info {\n  flex: 1;\n}\n\n.slot-name {\n  font-size: 16px;\n  font-weight: 500;\n  margin-bottom: 4px;\n}\n\n.slot-status {\n  font-size: 14px;\n  color: var(--secondary-text-color, #757575);\n}\n\n.slot-expand {\n  width: 100%;\n  padding: 8px 0;\n  margin-top: var(--mdc-layout-grid-gutter, 12px);\n  border-radius: 0;\n  background: transparent;\n  border: none;\n  border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));\n  color: var(--primary-text-color, #212121);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.slot-expand ha-icon {\n  --mdc-icon-size: 20px;\n  transition: transform 0.2s;\n}\n\n.slot-card.expanded .slot-expand ha-icon {\n  transform: rotate(180deg);\n}\n\n/* Slot expandable, slot-details styles moved to shared/assets/homie-css.css */\n\n.slot-title {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n  width: 100%;\n  flex-basis: 100%;\n  margin-bottom: var(--mdc-layout-grid-gutter, 8px);\n}\n\n.slot-time,\n.slot-duration {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n}\n\n.slot-title ha-icon,\n.slot-time ha-icon,\n.slot-duration ha-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n}\n\n.slot-title .slot-title-input {\n  flex: 1;\n}\n\n/* Time picker styles are now in shared/homie-select/homie-select.css */\n\n.slot-time .time-picker-separator {\n  color: var(--primary-text-color, #212121);\n}\n\n/* Select styles are now in shared/homie-select.css */\n\n.slot-weekdays-wrapper {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n}\n\n.slot-weekdays-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n  flex-shrink: 0;\n}\n\n.slot-weekdays {\n  display: flex;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  flex-wrap: wrap;\n  flex: 1;\n  justify-content: flex-start;\n}\n\n.slot-weekday {\n  padding: var(--mdc-shape-small, 6px) var(--mdc-shape-small, 8px);\n  border-radius: var(--ha-card-border-radius, var(--mdc-shape-small, 4px));\n  background: var(--secondary-background-color, #f5f5f5);\n  border: 2px solid var(--divider-color, rgba(0, 0, 0, 0.12));\n  color: var(--primary-text-color, #212121);\n  font-size: 12px;\n  font-weight: 400;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n  flex-shrink: 0;\n  min-width: fit-content;\n  flex: 1;\n  text-align: center;\n  min-width: 0;\n}\n\n.slot-weekday.active {\n  background: var(--primary-color, #03a9f4);\n  color: var(--text-primary-on-background, #ffffff);\n  font-weight: 600;\n  border-color: var(--primary-color, #03a9f4);\n}\n\n/* Slot delete, empty state styles moved to shared/assets/homie-css.css */\n\n/* Popup overlay, popup-header, popup-body, popup-field styles moved to shared/assets/homie-css.css */\n\n/* Popup content (defaults, override via --homie-slots-popup-*) */\n.popup-content {\n  background: var(--_popup-bg);\n  color: var(--_popup-color);\n  -webkit-backdrop-filter: var(--_popup-backdrop-filter);\n  backdrop-filter: var(--_popup-backdrop-filter);\n  box-shadow: var(--_popup-box-shadow);\n  border-radius: var(--_popup-border-radius);\n  width: var(--_popup-width);\n  max-width: var(--_popup-max-width);\n  min-width: var(--_popup-min-width);\n  max-height: var(--_popup-max-height);\n  overflow-y: auto;\n  animation: slideUp 0.3s;\n}\n\n@keyframes slideUp {\n  from {\n    transform: translateY(20px);\n    opacity: 0;\n  }\n  to {\n    transform: translateY(0);\n    opacity: 1;\n  }\n}\n\n\n/* Slot time selects */\n.slot-time .time-selects {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n  width: auto;\n}\n\n.slot-time .time-separator {\n  font-size: 14px;\n  color: var(--primary-text-color, #212121);\n}\n\n/* Popup select styles are now in shared/homie-select.css */\n\n/* Time selects, weekday selector, popup footer/button styles moved to shared/assets/homie-css.css */\n\n/* ========================================\n   RESPONSIVE\n   ======================================== */\n\n@media (max-width: 480px) {\n  .main-header {\n    padding: var(--mdc-shape-small, 12px);\n  }\n  \n  .header-title {\n    font-size: 16px;\n  }\n  \n  .slot-card {\n    padding: var(--mdc-shape-small, 12px);\n  }\n  \n  :host {\n    --_popup-width: var(--mdc-dialog-width, 95%);\n    --_popup-max-height: var(--mdc-dialog-max-height, 85vh);\n  }\n}\n\n/* ========================================\n   DARK THEME SUPPORT\n   ======================================== */\n\n/* Dark theme adjustments are handled by HA CSS variables */\n/* No additional dark theme styles needed */\n`;
+    const styleContent = `/**\n * Shared styles for slot-form-fields.html (Add Slot popup + Edit Slot).\n * Uses :host CSS variables from the card (--_accent, --_text, etc.).\n */\n\n.popup-field { margin-bottom: 20px; }\n.popup-field:last-child { margin-bottom: 0; }\n\n/* Shared form (add popup + edit slot) - one structure, same styles */\n.slot-form .slot-form-field { margin-bottom: 20px; }\n.slot-form .slot-form-field:last-child { margin-bottom: 0; }\n.slot-form .slot-form-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  margin-bottom: 8px;\n}\n.slot-form .slot-form-label ha-icon { --mdc-icon-size: 22px; color: var(--_accent); }\n\n/* Mode, Fan, Temp in one row */\n.slot-form-row {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 12px 16px;\n  align-items: flex-end;\n  margin-bottom: 20px;\n}\n.slot-form-row .slot-form-field {\n  flex: 1;\n  min-width: 0;\n  margin-bottom: 0;\n}\n.slot-form-row-mode-fan-temp .slot-form-field-mode,\n.slot-form-row-mode-fan-temp .slot-form-field-fan,\n.slot-form-row-mode-fan-temp .slot-form-field-temp {\n  flex: 1 1 0;\n  min-width: 0;\n}\n/* stretch selects and inputs to full column width */\n.slot-form-row-mode-fan-temp .slot-form-field select,\n.slot-form-row-mode-fan-temp .slot-form-field input[type="number"] {\n  width: 100%;\n  box-sizing: border-box;\n  display: block;\n}\n\n.slot-form-field-mode .slot-form-mode-select { width: 100%; box-sizing: border-box; }\n.slot-form-mode-warning {\n  margin-top: 8px;\n  font-size: 12px;\n  color: var(--_error-color);\n  line-height: 1.4;\n}\n.slot-form-mode-warning:empty { display: none; }\n\n.slot-form-entities-wrap { position: relative; }\n.slot-form-entities-trigger {\n  margin-top: 8px;\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  min-height: 40px;\n  padding: 6px 12px;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_bg-select);\n  cursor: pointer;\n  transition: border-color 0.2s, box-shadow 0.2s;\n}\n.slot-form-entities-trigger:hover,\n.slot-form-entities-trigger.open {\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.slot-form-entities-chips {\n  flex: 1;\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n  align-items: center;\n  min-height: 24px;\n}\n.popup-entity-chip {\n  display: inline-flex;\n  align-items: center;\n  padding: 2px 8px;\n  border-radius: var(--_radius-small);\n  background: var(--_secondary-bg);\n  border: 1px solid var(--_divider);\n  font-size: 12px;\n  color: var(--_text);\n  white-space: nowrap;\n}\n.slot-form-entities-caret {\n  --mdc-icon-size: 20px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n  transition: transform 0.2s;\n}\n.slot-form-entities-trigger.open .slot-form-entities-caret {\n  transform: rotate(180deg);\n}\n.slot-form-entities-dropdown {\n  display: none;\n  position: absolute;\n  left: 0;\n  right: 0;\n  top: 100%;\n  margin-top: 4px;\n  z-index: 10;\n  flex-direction: column;\n  border-radius: var(--_radius-medium);\n  border: 1px solid var(--_divider);\n  background: var(--_popup-bg);\n  box-shadow: var(--_popup-box-shadow);\n  max-height: 220px;\n  overflow: hidden;\n}\n.slot-form-entities-dropdown.open {\n  display: flex;\n}\n.slot-form-entities-select-all-row {\n  border-bottom: 1px solid var(--_divider);\n  flex-shrink: 0;\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  padding: 10px 16px;\n  cursor: pointer;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.slot-form-entity-row:hover {\n  background: var(--_secondary-bg);\n}\n.entities-selector-row.entities-selector-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.entities-selector-row.entities-selector-row-unsupported .entities-selector-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n.slot-form-entities-dropdown .entities-selector-list {\n  overflow-y: auto;\n  overflow-x: hidden;\n  display: flex;\n  flex-direction: column;\n  flex: 1;\n  min-height: 0;\n}\n.slot-form-entities-dropdown .entities-selector-row {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  padding: 10px 16px;\n  cursor: pointer;\n  border-bottom: 1px solid var(--_divider);\n  transition: background 0.2s;\n  min-height: 44px;\n  box-sizing: border-box;\n}\n.popup-entities-dropdown .entities-selector-row:last-child {\n  border-bottom: none;\n}\n.popup-entities-dropdown .entities-selector-row:hover {\n  background: var(--_secondary-bg);\n}\n.popup-entities-dropdown .entities-selector-row.hidden {\n  display: none;\n}\n.popup-entities-dropdown .entities-selector-row-unsupported {\n  opacity: 0.5;\n  pointer-events: none;\n}\n.popup-entities-dropdown .entities-selector-row-unsupported .entities-selector-entity-name::after {\n  content: ' (not supported for this mode)';\n  font-size: 11px;\n  color: var(--_text-secondary);\n  font-weight: 400;\n}\n.popup-entity-row input[type="checkbox"] {\n  width: 18px;\n  height: 18px;\n  margin: 0;\n  cursor: pointer;\n  accent-color: var(--_accent);\n  flex-shrink: 0;\n}\n.popup-entity-row ha-icon {\n  --mdc-icon-size: 22px;\n  color: var(--_text-secondary);\n  flex-shrink: 0;\n}\n.popup-entity-name {\n  flex: 1;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}\n.popup-entities-list label {\n  cursor: pointer;\n}\n.popup-field label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  margin-bottom: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n}\n.popup-field label ha-icon { --mdc-icon-size: 24px; color: var(--_accent); }\n\n/* HA-style row: label left, control (e.g. ha-switch) right */\n.popup-field-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 8px 0;\n  gap: 16px;\n  cursor: pointer;\n}\n.popup-field-row-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  cursor: pointer;\n  margin: 0;\n  flex: 1;\n}\n.popup-field-row-label ha-icon {\n  --mdc-icon-size: 24px;\n  color: var(--_accent);\n}\n.popup-duration-row ha-switch,\n.slot-form-duration-enabled {\n  flex-shrink: 0;\n}\n.slot-form-duration-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding: 8px 0;\n  gap: 16px;\n  cursor: pointer;\n}\n.slot-form-field-row-label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n  cursor: pointer;\n  margin: 0;\n  flex: 1;\n}\n.slot-form-field-row-label ha-icon {\n  --mdc-icon-size: 24px;\n  color: var(--_accent);\n}\n/* Slot edit: same vertical layout as add (label on new line, then control) */\n.slot-expandable .slot-form .slot-form-field {\n  display: block;\n  font-size: 14px;\n}\n.slot-expandable .slot-form-title-input {\n  width: 100%;\n  box-sizing: border-box;\n}\n\n/**\n * Boiler Scheduler Card - Styles\n * All variables in :host; common/slot/popup/duration use them (overridable via --homie-slots-*).\n */\n\n:host {\n  display: block;\n  padding: 0;\n  overflow: hidden;\n  background: transparent;\n  font-size: var(--homie-slots-font-size, 1.1em);\n  --circular-button-size: var(--mdc-icon-button-size, 40px);\n\n  /* Card (header, slot card) */\n  --_accent: var(--homie-slots-accent, var(--primary-color, #03a9f4));\n  --_bg: var(--homie-slots-bg, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_radius: var(--homie-slots-radius, var(--ha-card-border-radius, 8px));\n  --_shadow: var(--homie-slots-shadow, var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1)));\n  --_text: var(--homie-slots-text, var(--primary-text-color, #212121));\n  --_text-secondary: var(--homie-slots-text-secondary, var(--secondary-text-color, #757575));\n  --_text-on-accent: var(--homie-slots-text-on-accent, var(--text-primary-on-background, #ffffff));\n  --_disabled-color: var(--homie-slots-disabled, var(--disabled-color, var(--disabled-text-color, #9e9e9e)));\n\n  /* Select */\n  --_bg-select: var(--homie-slots-bg-select, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9))));\n  --_divider-select: var(--homie-slots-divider-select, var(--divider-color, rgba(0, 0, 0, 0.12)));\n  --_text-select: var(--homie-slots-text-select, var(--primary-text-color, #212121));\n  --_radius-select: var(--homie-slots-radius-select, var(--mdc-shape-small, 4px));\n  --_focus-ring: var(--homie-slots-focus-ring, 0 0 0 2px rgba(3, 169, 244, 0.1));\n\n  /* Input, buttons, slot, weekday, duration */\n  --_padding-input-vertical: var(--homie-slots-padding-input-vertical, var(--mdc-shape-small, 4px));\n  --_padding-input-horizontal: var(--homie-slots-padding-input-horizontal, var(--mdc-shape-small, 8px));\n  --_border-input: var(--homie-slots-border-input, 1px solid var(--_divider));\n  --_radius-input: var(--homie-slots-radius-input, var(--_radius-small));\n  --_divider: var(--homie-slots-divider, var(--divider-color, rgba(0, 0, 0, 0.12)));\n  --_radius-small: var(--homie-slots-radius-small, var(--mdc-shape-small, 4px));\n  --_radius-medium: var(--homie-slots-radius-medium, var(--mdc-shape-medium, 8px));\n  --_secondary-bg: var(--homie-slots-secondary-bg, var(--secondary-background-color, #f5f5f5));\n  --_error-color: var(--homie-slots-error-color, var(--error-color, #f44336));\n\n  /* Button outline */\n  --_button-outline-padding: var(--homie-slots-button-outline-padding, var(--mdc-button-horizontal-padding, 16px));\n  --_button-outline-margin-top: var(--homie-slots-button-outline-margin-top, var(--mdc-layout-grid-gutter, 12px));\n  --_button-outline-radius: var(--homie-slots-button-outline-radius, var(--_radius-medium));\n  --_button-outline-bg: var(--homie-slots-button-outline-bg, transparent);\n  --_button-outline-border: var(--homie-slots-button-outline-border, 2px solid var(--_accent));\n  --_button-outline-color: var(--homie-slots-button-outline-color, var(--_accent));\n  --_button-outline-font-size: var(--homie-slots-button-outline-font-size, var(--mdc-typography-button-font-size, 14px));\n  --_button-outline-font-weight: var(--homie-slots-button-outline-font-weight, var(--mdc-typography-button-font-weight, 900));\n  --_button-outline-letter-spacing: var(--homie-slots-button-outline-letter-spacing, var(--mdc-typography-button-letter-spacing, 0em));\n  --_button-outline-min-height: var(--homie-slots-button-outline-min-height, var(--mdc-button-height, 36px));\n  --_button-outline-hover-shadow: var(--homie-slots-button-outline-hover-shadow, 0 2px 8px rgba(3, 169, 244, 0.3));\n  --_button-outline-active-transform: var(--homie-slots-button-outline-active-transform, scale(0.98));\n  --_button-outline-active-shadow: var(--homie-slots-button-outline-active-shadow, 0 1px 4px rgba(3, 169, 244, 0.2));\n\n  /* Popup */\n  --_popup-bg: var(--homie-slots-popup-background, var(--ha-dialog-background, var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)))));\n  --_popup-color: var(--homie-slots-popup-color, var(--primary-text-color, #212121));\n  --_popup-backdrop-filter: var(--homie-slots-popup-backdrop-filter, var(--ha-card-backdrop-filter, none));\n  --_popup-box-shadow: var(--homie-slots-popup-box-shadow, var(--ha-card-box-shadow, none));\n  --_popup-border-radius: var(--homie-slots-popup-border-radius, var(--ha-card-border-radius, 16px));\n  --_popup-width: var(--mdc-dialog-width, 90%);\n  --_popup-max-width: var(--mdc-dialog-max-width, 400px);\n  --_popup-min-width: var(--mdc-dialog-min-width, 0px);\n  --_popup-max-height: var(--mdc-dialog-max-height, 90vh);\n\n  color: var(--_text);\n}\n\n/* === Common / slot / popup / duration (use :host vars above) === */\n.homie-select {\n  background: var(--_bg-select);\n  border: 1px solid var(--_divider-select);\n  border-radius: var(--_radius-select);\n  color: var(--_text-select);\n  font-size: 14px;\n  font-family: inherit;\n  cursor: pointer;\n  appearance: none;\n  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23999999' d='M6 9L1 4h10z'/%3E%3C/svg%3E");\n  background-repeat: no-repeat;\n  background-position: right var(--mdc-shape-small, 6px) center;\n  background-size: 12px;\n  transition: border-color 0.2s, box-shadow 0.2s;\n  padding: var(--_padding-input-vertical) var(--_padding-input-horizontal);\n  padding-right: calc(var(--_padding-input-horizontal) * 2 + 12px);\n}\n@media (prefers-color-scheme: dark) {\n  .homie-select {\n    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 9L1 4h10z'/%3E%3C/svg%3E");\n  }\n}\n.homie-select:focus {\n  outline: none;\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.homie-select option {\n  background: var(--_bg-select);\n  color: var(--_text-select);\n}\n.homie-input {\n  width: 100%;\n  background: var(--_bg);\n  border: var(--_border-input);\n  border-radius: var(--_radius-input);\n  color: var(--_text);\n  font-size: 14px;\n  font-family: inherit;\n  padding: var(--_padding-input-vertical) var(--_padding-input-horizontal);\n  transition: border-color 0.2s, box-shadow 0.2s;\n  box-sizing: border-box;\n}\n.homie-input:focus {\n  outline: none;\n  border-color: var(--_accent);\n  box-shadow: var(--_focus-ring);\n}\n.homie-input::placeholder {\n  color: var(--_text-secondary);\n  opacity: 0.7;\n}\n.button-outline {\n  width: 100%;\n  padding: var(--_button-outline-padding) var(--_button-outline-padding);\n  margin-top: var(--_button-outline-margin-top);\n  border-radius: var(--_button-outline-radius);\n  background: var(--_button-outline-bg);\n  border: var(--_button-outline-border);\n  color: var(--_button-outline-color);\n  font-size: var(--_button-outline-font-size);\n  font-weight: var(--_button-outline-font-weight);\n  letter-spacing: var(--_button-outline-letter-spacing);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n  min-height: var(--_button-outline-min-height);\n}\n.button-outline:hover {\n  background: var(--_accent);\n  color: var(--_text-on-accent);\n  box-shadow: var(--_button-outline-hover-shadow);\n}\n.button-outline:active {\n  transform: var(--_button-outline-active-transform);\n  box-shadow: var(--_button-outline-active-shadow);\n}\n.slot-expandable {\n  max-height: 0;\n  overflow: hidden;\n  transition: max-height 0.3s ease-out;\n}\n.slot-card.expanded .slot-expandable {\n  max-height: 500px;\n  transition: max-height 0.3s ease-in;\n  padding: var(--ha-card-header-padding, 16px) 0;\n  display: flex;\n  flex-direction: column;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n}\n.slot-details {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 16px);\n  margin-bottom: var(--mdc-layout-grid-gutter, 12px);\n  flex-wrap: wrap;\n}\n.slot-time, .slot-duration {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n}\n.slot-time ha-icon, .slot-duration ha-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n}\n.slot-time .time-picker-separator {\n  color: var(--_text);\n}\n.slot-delete {\n  width: 100%;\n  padding: var(--mdc-shape-small, 10px);\n  margin-top: var(--mdc-layout-grid-gutter, 12px);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  border: 1px solid var(--_divider);\n  color: var(--_error-color);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: var(--mdc-layout-grid-gutter, 8px);\n  transition: all 0.2s;\n  font-size: 14px;\n  font-weight: 500;\n  font-family: inherit;\n}\n.slot-delete:active { transform: scale(0.98); }\n.slot-delete ha-icon { --mdc-icon-size: 22px; }\n.empty-state {\n  text-align: center;\n  padding: 48px 16px;\n  color: var(--_text-secondary);\n}\n.empty-state ha-icon { --mdc-icon-size: 48px; opacity: 0.3; margin-bottom: 16px; }\n.empty-text { font-size: 14px; line-height: 20px; }\n.popup-overlay {\n  position: fixed;\n  top: 0; left: 0; right: 0; bottom: 0;\n  background: rgba(0, 0, 0, 0.5);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  z-index: 1000;\n  animation: fadeIn 0.2s;\n}\n@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }\n.popup-header {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  padding: var(--ha-card-header-padding, 20px);\n  border-bottom: 1px solid var(--_divider);\n}\n.popup-header ha-icon { --mdc-icon-size: 28px; color: var(--_accent); }\n.popup-title { flex: 1; font-size: 18px; font-weight: 500; color: var(--_text); }\n.popup-close {\n  width: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  height: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  min-width: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  min-height: var(--circular-button-size, var(--mdc-icon-button-size, 40px));\n  border-radius: 50%;\n  background: transparent;\n  border: none;\n  color: var(--_text-secondary);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n}\n.popup-close ha-icon { --mdc-icon-size: 24px; }\n.popup-body { padding: var(--ha-card-header-padding, 20px); }\n.popup-error {\n  color: var(--error-color, #b00020);\n  font-size: 13px;\n  margin-bottom: 12px;\n  display: block;\n}\n.slot-error-message {\n  color: var(--error-color, #b00020);\n  font-size: 13px;\n  margin-bottom: 8px;\n}\n.popup-field { margin-bottom: 20px; }\n.popup-field:last-child { margin-bottom: 0; }\n.popup-field label {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  margin-bottom: 8px;\n  font-size: 14px;\n  font-weight: 500;\n  color: var(--_text);\n}\n.popup-field label ha-icon { --mdc-icon-size: 24px; color: var(--_accent); }\n.popup-footer {\n  display: flex;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  padding: var(--ha-card-header-padding, 20px);\n  border-top: 1px solid var(--_divider);\n}\n.popup-button {\n  flex: 1;\n  padding: var(--mdc-shape-small, 12px) var(--mdc-shape-medium, 24px);\n  border: none;\n  border-radius: var(--_radius-medium);\n  font-size: 14px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  font-family: inherit;\n}\n.popup-button.cancel { background: var(--_secondary-bg); color: var(--_text); }\n.popup-button.save { background: var(--_accent); color: var(--_text-on-accent); }\n.popup-button:active { transform: scale(0.98); }\n.time-selects { display: flex; align-items: center; gap: 8px; width: 100%; }\n.popup-time-hours, .popup-time-minutes { flex: 1; }\n.time-separator { font-size: 18px; font-weight: 500; color: var(--_text-secondary); user-select: none; }\n.slot-time .time-selects { display: flex; align-items: center; gap: 6px; width: auto; }\n.slot-time .time-separator { font-size: 14px; color: var(--_text); }\n.weekday-mode-selector { display: flex; gap: 8px; margin-bottom: 12px; }\n.weekday-mode-btn {\n  flex: 1;\n  padding: var(--mdc-shape-small, 10px);\n  border: 2px solid var(--_divider);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  color: var(--_text-secondary);\n  text-align: center;\n  font-size: 13px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n  font-family: inherit;\n}\n.weekday-mode-btn.active, .weekday-mode-btn:hover {\n  background: var(--_accent);\n  border-color: var(--_accent);\n  color: var(--_text-on-accent);\n}\n.weekday-mode-btn:hover { opacity: 0.8; }\n.popup-weekdays { display: flex; gap: 8px; flex-wrap: wrap; }\n.popup-weekdays.hidden { display: none; }\n.popup-weekday {\n  flex: 1;\n  min-width: 40px;\n  padding: var(--mdc-shape-small, 10px);\n  border: 2px solid var(--_divider);\n  border-radius: var(--_radius-medium);\n  background: var(--_secondary-bg);\n  color: var(--_text-secondary);\n  text-align: center;\n  font-size: 13px;\n  font-weight: 500;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n}\n.popup-weekday.active {\n  background: var(--_accent);\n  border-color: var(--_accent);\n  color: var(--_text-on-accent);\n}\n@media (max-width: 480px) {\n  .popup-weekday { min-width: 35px; padding: 8px; font-size: 12px; }\n}\n.duration-selector-wrapper {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  width: 100%;\n}\n.duration-slider {\n  flex: 1;\n  height: 4px;\n  border-radius: 2px;\n  background: var(--_divider);\n  outline: none;\n  -webkit-appearance: none;\n  appearance: none;\n}\n.duration-slider::-webkit-slider-thumb {\n  -webkit-appearance: none;\n  appearance: none;\n  width: 20px;\n  height: 20px;\n  border-radius: 50%;\n  background: var(--_accent);\n  cursor: pointer;\n  border: 2px solid var(--_bg);\n  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);\n  transition: all 0.2s;\n}\n.duration-slider::-webkit-slider-thumb:hover {\n  transform: scale(1.1);\n  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);\n}\n.duration-slider::-moz-range-thumb {\n  width: 20px;\n  height: 20px;\n  border-radius: 50%;\n  background: var(--_accent);\n  cursor: pointer;\n  border: 2px solid var(--_bg);\n  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);\n  transition: all 0.2s;\n}\n.duration-slider::-moz-range-thumb:hover {\n  transform: scale(1.1);\n  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);\n}\n.duration-input {\n  width: 80px;\n  min-width: 80px;\n  text-align: center;\n}\n\n/* ========================================\n   MAIN HEADER\n   ======================================== */\n\n.main-header {\n  display: flex;\n  justify-content: space-between;\n  align-items: center;\n  padding: var(--ha-card-header-padding, 16px);\n  background: var(--_bg);\n  border-radius: var(--_radius);\n  box-shadow: var(--_shadow);\n  backdrop-filter: var(--ha-card-backdrop-filter, blur(10px));\n}\n\n.main-header:not(:last-child) {\n  margin-bottom: var(--mdc-layout-grid-gutter, 12px);\n}\n\n.header-left {\n  display: flex;\n  align-items: center;\n  gap: 12px;\n  flex: 1;\n}\n\n.header-icon {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--_accent);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  color: var(--_text-on-accent);\n  cursor: pointer;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.header-icon:active {\n  transform: scale(0.95);\n}\n\n.header-icon.disabled {\n  opacity: 0.5;\n  background: var(--_disabled-color);\n}\n\n.header-icon.enabled {\n  background: var(--_accent);\n  opacity: 1;\n}\n\n.header-icon ha-icon {\n  --mdc-icon-size: 28px;\n}\n\n.header-text {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n\n.header-title {\n  font-size: 16px;\n  font-weight: 500;\n  color: var(--primary-text-color, #212121);\n  line-height: 22px;\n}\n\n.header-title--hidden {\n  display: none;\n}\n\n.header-status {\n  font-size: 14px;\n  color: var(--secondary-text-color, #757575);\n  line-height: 20px;\n}\n\n.add-button {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--primary-color, #03a9f4);\n  border: none;\n  color: var(--text-primary-on-background, #ffffff);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.add-button:active {\n  transform: scale(0.95);\n}\n\n.add-button ha-icon {\n  --mdc-icon-size: 28px;\n}\n\n/* ========================================\n   ADD SLOT BUTTON\n   ======================================== */\n\n/* Button outline style moved to shared/assets/homie-css.css */\n\n/* ========================================\n   SLOTS CONTAINER\n   ======================================== */\n\n.slots-container {\n  display: flex;\n  flex-direction: column;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n}\n\n.slots-container--empty {\n  display: none;\n}\n\n/* ========================================\n   SLOT CARD (Blue Card Design)\n   ======================================== */\n\n.slot-card {\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n  border-radius: var(--ha-card-border-radius, var(--mdc-shape-medium, 8px));\n  padding: var(--ha-card-header-padding, 16px) var(--ha-card-header-padding, 16px) 0 var(--ha-card-header-padding, 16px);\n  color: var(--primary-text-color, #212121);\n  position: relative;\n  box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));\n  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;\n  backdrop-filter: var(--ha-card-backdrop-filter, blur(10px));\n}\n\n/* Active slot (enabled) - same background as header */\n.slot-card:not(.disabled) {\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.9)));\n}\n\n.slot-card.disabled {\n  opacity: 0.6;\n  background: var(--ha-card-background, var(--card-background-color, rgba(255, 255, 255, 0.5)));\n}\n\n.slot-header {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 12px);\n  margin-bottom: 0;\n}\n\n.slot-icon {\n  width: var(--circular-button-size);\n  height: var(--circular-button-size);\n  min-width: var(--circular-button-size);\n  min-height: var(--circular-button-size);\n  border-radius: 50%;\n  background: var(--primary-color, #03a9f4);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  cursor: pointer;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n  color: var(--text-primary-on-background, #ffffff);\n}\n\n.slot-icon:active {\n  transform: scale(0.95);\n}\n\n.slot-icon.enabled {\n  background: var(--primary-color, #03a9f4);\n  opacity: 1;\n}\n\n.slot-icon.disabled {\n  background: var(--disabled-color, var(--disabled-text-color, #9e9e9e));\n  opacity: 0.6;\n}\n\n.slot-icon ha-icon {\n  --mdc-icon-size: 24px;\n}\n\n.slot-info {\n  flex: 1;\n}\n\n.slot-name {\n  font-size: 16px;\n  font-weight: 500;\n  margin-bottom: 4px;\n}\n\n.slot-status {\n  font-size: 14px;\n  color: var(--secondary-text-color, #757575);\n}\n\n.slot-expand {\n  width: 100%;\n  padding: 8px 0;\n  margin-top: var(--mdc-layout-grid-gutter, 12px);\n  border-radius: 0;\n  background: transparent;\n  border: none;\n  border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));\n  color: var(--primary-text-color, #212121);\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: all 0.2s;\n  -webkit-tap-highlight-color: transparent;\n}\n\n.slot-expand ha-icon {\n  --mdc-icon-size: 20px;\n  transition: transform 0.2s;\n}\n\n.slot-card.expanded .slot-expand ha-icon {\n  transform: rotate(180deg);\n}\n\n/* Slot expandable, slot-details styles moved to shared/assets/homie-css.css */\n\n.slot-title {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n  width: 100%;\n  flex-basis: 100%;\n  margin-bottom: var(--mdc-layout-grid-gutter, 8px);\n}\n\n.slot-time,\n.slot-duration {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  font-size: 14px;\n}\n\n.slot-title ha-icon,\n.slot-time ha-icon,\n.slot-duration ha-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n}\n\n.slot-title .slot-title-input {\n  flex: 1;\n}\n\n/* Time picker styles are now in shared/homie-select/homie-select.css */\n\n.slot-time .time-picker-separator {\n  color: var(--primary-text-color, #212121);\n}\n\n/* Select styles are now in shared/homie-select.css */\n\n.slot-weekdays-wrapper {\n  display: flex;\n  align-items: center;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n}\n\n.slot-weekdays-icon {\n  --mdc-icon-size: 22px;\n  opacity: 0.9;\n  flex-shrink: 0;\n}\n\n.slot-weekdays {\n  display: flex;\n  gap: var(--mdc-layout-grid-gutter, 6px);\n  flex-wrap: wrap;\n  flex: 1;\n  justify-content: flex-start;\n}\n\n.slot-weekday {\n  padding: var(--mdc-shape-small, 6px) var(--mdc-shape-small, 8px);\n  border-radius: var(--ha-card-border-radius, var(--mdc-shape-small, 4px));\n  background: var(--secondary-background-color, #f5f5f5);\n  border: 2px solid var(--divider-color, rgba(0, 0, 0, 0.12));\n  color: var(--primary-text-color, #212121);\n  font-size: 12px;\n  font-weight: 400;\n  cursor: pointer;\n  transition: all 0.2s;\n  user-select: none;\n  flex-shrink: 0;\n  min-width: fit-content;\n  flex: 1;\n  text-align: center;\n  min-width: 0;\n}\n\n.slot-weekday.active {\n  background: var(--primary-color, #03a9f4);\n  color: var(--text-primary-on-background, #ffffff);\n  font-weight: 600;\n  border-color: var(--primary-color, #03a9f4);\n}\n\n/* Slot delete, empty state styles moved to shared/assets/homie-css.css */\n\n/* Popup overlay, popup-header, popup-body, popup-field styles moved to shared/assets/homie-css.css */\n\n/* Popup content (defaults, override via --homie-slots-popup-*) */\n.popup-content {\n  background: var(--_popup-bg);\n  color: var(--_popup-color);\n  -webkit-backdrop-filter: var(--_popup-backdrop-filter);\n  backdrop-filter: var(--_popup-backdrop-filter);\n  box-shadow: var(--_popup-box-shadow);\n  border-radius: var(--_popup-border-radius);\n  width: var(--_popup-width);\n  max-width: var(--_popup-max-width);\n  min-width: var(--_popup-min-width);\n  max-height: var(--_popup-max-height);\n  overflow-y: auto;\n  animation: slideUp 0.3s;\n}\n\n@keyframes slideUp {\n  from {\n    transform: translateY(20px);\n    opacity: 0;\n  }\n  to {\n    transform: translateY(0);\n    opacity: 1;\n  }\n}\n\n\n/* Slot time selects */\n.slot-time .time-selects {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n  width: auto;\n}\n\n.slot-time .time-separator {\n  font-size: 14px;\n  color: var(--primary-text-color, #212121);\n}\n\n/* Popup select styles are now in shared/homie-select.css */\n\n/* Time selects, weekday selector, popup footer/button styles moved to shared/assets/homie-css.css */\n\n/* ========================================\n   RESPONSIVE\n   ======================================== */\n\n@media (max-width: 480px) {\n  .main-header {\n    padding: var(--mdc-shape-small, 12px);\n  }\n  \n  .header-title {\n    font-size: 16px;\n  }\n  \n  .slot-card {\n    padding: var(--mdc-shape-small, 12px);\n  }\n  \n  :host {\n    --_popup-width: var(--mdc-dialog-width, 95%);\n    --_popup-max-height: var(--mdc-dialog-max-height, 85vh);\n  }\n}\n\n/* ========================================\n   DARK THEME SUPPORT\n   ======================================== */\n\n/* Dark theme adjustments are handled by HA CSS variables */\n/* No additional dark theme styles needed */\n`;
     const mdiFontLink = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@latest/css/materialdesignicons.min.css">`;
 
     // Prepare template data
@@ -4067,7 +4480,9 @@ if (typeof customElements !== 'undefined' && !customElements.get('homie-schedule
   window.logCardInfo('boiler-slots-card');
 }
 
-const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
+
+// Use hours duration selector (0.5–12 h, step 0.5). In bundle, boiler loads first and sets DurationSelector = mins; climate must use DurationSelectorHours.
+const DurationSelector = window.DurationSelectorHours || window.DurationSelector;
 
 
 class HomieClimateScheduleSlotsCard extends HTMLElement {
@@ -4084,7 +4499,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     this._bridgeSensor = null;
     this._debounceTimer = null;
     this._htmlTemplate = null;
-    this._expandedSlots = new Set(); // Track expanded slots by key (time|weekdays) so adding/removing entities doesn't collapse
+    this._expandedSlots = new Set(); // Track expanded slots by display key (time|weekdays|duration|mode|temp|fan|title)
     this._configError = null; // Store config error message
     this._unsubStateChanged = null; // Unsubscribe function for state_changed events
     this._optimisticBridgeState = null; // Local overlay for optimistic updates (avoids mutating hass.states)
@@ -4447,6 +4862,26 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     return e ? [e] : [];
   }
 
+  /** Display slot key: group in one card when time, weekdays, duration, mode, temperature, fan_mode and title (or no title) match. For mode Off, duration/temperature/fan_mode/title are not used. */
+  _slotKeyForItem(item) {
+    return (item?.entity_id || '') + '|' + (item?.time || '') + '|' + JSON.stringify(item?.weekdays || []);
+  }
+
+  /** Display key: time, weekdays, duration, mode, temp, fan, title. If several items share same (entity_id, time, weekdays) — use item.id so they don't merge (e.g. one with custom title, one without). */
+  _getDisplaySlotKey(item, duplicatedSlotKeys) {
+    if (!item) return '';
+    const mode = item.service_start?.value?.hvac_mode ?? '';
+    const isOff = mode === 'off';
+    const durationPart = isOff ? '' : (item.duration ?? '');
+    const temp = item.service_start?.value?.temperature;
+    const tempStr = isOff ? '' : (temp !== undefined && temp !== null ? String(temp) : '');
+    const fan = isOff ? '' : (item.service_start?.value?.fan_mode ?? '');
+    const slotKey = this._slotKeyForItem(item);
+    const isDuplicated = duplicatedSlotKeys && duplicatedSlotKeys.has(slotKey);
+    const titlePart = isDuplicated ? (item.id || '') : (item.title || '');
+    return (item.time || '') + '|' + JSON.stringify(item.weekdays || []) + '|' + durationPart + '|' + mode + '|' + tempStr + '|' + fan + '|' + titlePart;
+  }
+
   _getItems() {
     try {
       const entities = this._getEntities();
@@ -4461,10 +4896,16 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         entitySet.has(item.entity_id) && 
         item.temporary !== true
       );
-      // Dedupe by (time, weekdays): when both temp and real slot exist, show only one (prefer real)
+      const slotKeyCount = new Map();
+      for (const it of filtered) {
+        const sk = this._slotKeyForItem(it);
+        slotKeyCount.set(sk, (slotKeyCount.get(sk) || 0) + 1);
+      }
+      const duplicatedSlotKeys = new Set([...slotKeyCount.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+      // Dedupe by display key: when both temp and real slot exist, show only one (prefer real)
       const byKey = new Map();
       for (const item of filtered) {
-        const key = (item.time || '') + '|' + JSON.stringify(item.weekdays || []);
+        const key = this._getDisplaySlotKey(item, duplicatedSlotKeys);
         const existing = byKey.get(key);
         const isTemp = item.id && String(item.id).startsWith('temp-');
         if (!existing) {
@@ -5131,19 +5572,40 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       this._updateHvacModeWarning();
       this._updateAddPopupFanAndTemp();
       this._syncPopupDurationVisibility();
+      requestAnimationFrame(() => {
+        this._updateAddPopupFanAndTemp();
+        this._syncPopupDurationVisibility();
+      });
     }
   }
 
   _updateAddPopupFanAndTemp() {
     const root = this._getAddFormRoot();
     if (!root || !this._hass) return;
-    const selectedIds = this._getPopupSelectedEntityIds();
-    const entityId = selectedIds.length ? selectedIds[0] : this._getEntities()[0];
+    const hvacModeSelect = root.querySelector('[data-slot-form="mode"]');
     const fanSelect = root.querySelector('[data-slot-form="fan"]');
     const tempInput = root.querySelector('[data-slot-form="temp"]');
+    const isOff = hvacModeSelect && String(hvacModeSelect.value || '').trim().toLowerCase() === 'off';
+    if (isOff) {
+      if (tempInput) {
+        tempInput.value = '';
+        tempInput.placeholder = '—';
+        tempInput.disabled = true;
+        tempInput.setAttribute('disabled', '');
+      }
+      if (fanSelect) {
+        fanSelect.innerHTML = '<option value="">—</option>';
+        fanSelect.value = '';
+        fanSelect.disabled = true;
+        fanSelect.setAttribute('disabled', '');
+      }
+      return;
+    }
+    const selectedIds = this._getPopupSelectedEntityIds();
+    const entityId = selectedIds.length ? selectedIds[0] : this._getEntities()[0];
     if (!entityId) {
-      if (fanSelect) { fanSelect.innerHTML = '<option value="">—</option>'; fanSelect.value = ''; }
-      if (tempInput) { tempInput.min = 5; tempInput.max = 35; tempInput.value = 21; tempInput.placeholder = '—'; }
+      if (fanSelect) { fanSelect.innerHTML = '<option value="">—</option>'; fanSelect.value = ''; fanSelect.disabled = false; fanSelect.removeAttribute('disabled'); }
+      if (tempInput) { tempInput.min = 5; tempInput.max = 35; tempInput.value = 21; tempInput.placeholder = '—'; tempInput.disabled = false; tempInput.removeAttribute('disabled'); }
       return;
     }
     const state = this._hass.states[entityId];
@@ -5171,7 +5633,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       tempInput.step = attrs.target_temp_step ?? 0.5;
       tempInput.value = Math.max(min, Math.min(max, val));
       tempInput.placeholder = '—';
+      tempInput.disabled = false;
+      tempInput.removeAttribute('disabled');
     }
+    if (fanSelect) { fanSelect.disabled = false; fanSelect.removeAttribute('disabled'); }
   }
 
   _showAddPopupError(message) {
@@ -5198,13 +5663,33 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     return (b || []).some(d => setA.has(d));
   }
 
-  /** True if a slot already exists at (time) for any selected entity with at least one weekday overlapping. */
-  _hasAddSlotConflict(bridgeState, time, weekdays, selectedEntityIds) {
+  /** Content key for conflict detection: time, weekdays, mode, temp, fan, duration, title. */
+  _slotContentKey(data) {
+    const mode = data.service_start?.value?.hvac_mode ?? data.hvac_mode ?? '';
+    const isOff = mode === 'off';
+    const dur = isOff ? '' : (data.duration ?? '');
+    const temp = data.service_start?.value?.temperature ?? data.temperature;
+    const tempStr = isOff ? '' : (temp != null ? String(temp) : '');
+    const fan = isOff ? '' : (data.service_start?.value?.fan_mode ?? data.fan_mode ?? '');
+    const slotTitle = data.title ?? '';
+    return (data.time || '') + '|' + JSON.stringify(data.weekdays || []) + '|' + dur + '|' + mode + '|' + tempStr + '|' + fan + '|' + slotTitle;
+  }
+
+  /** True if a slot with same content (time, weekdays, mode, temp, fan, duration, title) already exists for any selected entity. */
+  _hasAddSlotConflict(bridgeState, time, weekdays, selectedEntityIds, newSlotData) {
     const allItems = bridgeState?.attributes?.items || [];
     const entitySet = new Set(selectedEntityIds);
+    if (!newSlotData) {
+      return allItems.some(i =>
+        i && !i.temporary && entitySet.has(i.entity_id) &&
+        i.time === time && this._weekdaysOverlap(weekdays, i.weekdays)
+      );
+    }
+    const newKey = this._slotContentKey({ ...newSlotData, time, weekdays });
     return allItems.some(i =>
       i && !i.temporary && entitySet.has(i.entity_id) &&
-      i.time === time && this._weekdaysOverlap(weekdays, i.weekdays)
+      i.time === time && this._weekdaysOverlap(weekdays, i.weekdays) &&
+      this._slotContentKey(i) === newKey
     );
   }
 
@@ -5268,12 +5753,6 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
     this._clearAddPopupError();
 
-    const bridgeState = this._getBridgeState();
-    if (this._hasAddSlotConflict(bridgeState, time, selectedDays, selectedEntityIds)) {
-      this._showAddPopupError('A slot already exists at this time and days for the selected entities.');
-      return;
-    }
-
     const fanSelect = root.querySelector('[data-slot-form="fan"]');
     const tempInput = root.querySelector('[data-slot-form="temp"]');
     const fanMode = fanSelect?.value || undefined;
@@ -5281,6 +5760,14 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     if (tempInput && tempInput.value !== '' && !Number.isNaN(Number(tempInput.value))) {
       temperature = parseFloat(tempInput.value);
     }
+
+    const bridgeState = this._getBridgeState();
+    const newSlotData = { time, weekdays: selectedDays, duration: durationValue, hvac_mode: hvacMode, temperature, fan_mode: fanMode, title };
+    if (this._hasAddSlotConflict(bridgeState, time, selectedDays, selectedEntityIds, newSlotData)) {
+      this._showAddPopupError('A slot with the same time, days, mode, and title already exists.');
+      return;
+    }
+
     const climateServicesByEntity = {};
     selectedEntityIds.forEach(eid => {
       climateServicesByEntity[eid] = ScheduleHelper.createClimateServices(eid, hvacMode, { temperature, fan_mode: fanMode });
@@ -5365,7 +5852,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     this._closeAddPopup();
   }
 
-  /** Climate duration limits (hours): fixed in code, not from dashboard config. */
+  /** Climate duration defaults (hours); actual values come from card config min_duration/max_duration/duration_step. */
   static get CLIMATE_DURATION_MIN() { return 0.5; }
   static get CLIMATE_DURATION_MAX() { return 12; }
   static get CLIMATE_DURATION_STEP() { return 0.5; }
@@ -5385,11 +5872,11 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     target.duration_step = source.duration_step ?? this.constructor.CLIMATE_DURATION_STEP;
   }
 
-  /** Duration config in hours: fixed 0.5–12, step 0.5 (same role as boiler _getDurationConfig but values hardcoded for climate). */
+  /** Duration config in hours: from card config (min_duration, max_duration, duration_step), same mechanism as boiler. */
   _getDurationConfig() {
-    const minDuration = this.constructor.CLIMATE_DURATION_MIN;
-    const maxDuration = this.constructor.CLIMATE_DURATION_MAX;
-    const durationStep = this.constructor.CLIMATE_DURATION_STEP;
+    const minDuration = this._config?.min_duration ?? this.constructor.CLIMATE_DURATION_MIN;
+    const maxDuration = this._config?.max_duration ?? this.constructor.CLIMATE_DURATION_MAX;
+    const durationStep = this._config?.duration_step ?? this.constructor.CLIMATE_DURATION_STEP;
     return { minDuration, maxDuration, durationStep };
   }
 
@@ -5601,17 +6088,44 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       }
     }
 
-    // Update Fan and Temp from service_start
+    // Update Fan and Temp from service_start (when mode is Off: show — and disabled)
+    const currentHvacModeSync = updatedItem.service_start?.value?.hvac_mode;
     const fanSelect = slotCard.querySelector('[data-slot-form="fan"]');
-    if (fanSelect && updatedItem.service_start?.value?.fan_mode != null) {
-      if (fanSelect.querySelector(`option[value="${updatedItem.service_start.value.fan_mode}"]`)) {
-        fanSelect.value = updatedItem.service_start.value.fan_mode;
-      }
-    }
     const tempInput = slotCard.querySelector('[data-slot-form="temp"]');
-    if (tempInput && updatedItem.service_start?.value?.temperature != null) {
-      const t = Number(updatedItem.service_start.value.temperature);
-      if (!Number.isNaN(t)) tempInput.value = t;
+    if (currentHvacModeSync === 'off') {
+      if (tempInput) {
+        tempInput.value = '';
+        tempInput.placeholder = '—';
+        tempInput.disabled = true;
+        tempInput.setAttribute('disabled', '');
+      }
+      if (fanSelect) {
+        if (!fanSelect.querySelector('option[value=""]')) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '—';
+          fanSelect.insertBefore(opt, fanSelect.firstChild);
+        }
+        fanSelect.value = '';
+        fanSelect.disabled = true;
+        fanSelect.setAttribute('disabled', '');
+      }
+    } else {
+      if (tempInput) {
+        tempInput.disabled = false;
+        tempInput.removeAttribute('disabled');
+        if (updatedItem.service_start?.value?.temperature != null) {
+          const t = Number(updatedItem.service_start.value.temperature);
+          if (!Number.isNaN(t)) tempInput.value = t;
+        }
+      }
+      if (fanSelect) {
+        fanSelect.disabled = false;
+        fanSelect.removeAttribute('disabled');
+        if (updatedItem.service_start?.value?.fan_mode != null && fanSelect.querySelector(`option[value="${updatedItem.service_start.value.fan_mode}"]`)) {
+          fanSelect.value = updatedItem.service_start.value.fan_mode;
+        }
+      }
     }
 
     // Update weekday selector state
@@ -5697,7 +6211,19 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       updates.service_start !== undefined ||
       updates.service_end !== undefined
     );
-    const itemIdsToUpdate = isSlotWideUpdate && bridgeState ? this._getSameSlotItemIds(bridgeState, itemId) : [itemId];
+    // Title-only update: match by display key (so slots with different titles stay separate).
+    // Other slot-wide updates (time/weekdays/duration/mode/enabled): match by time+weekdays (all entities in that position).
+    const isTitleOnlyUpdate = isSlotWideUpdate && updates.title !== undefined &&
+      updates.time === undefined && updates.duration === undefined && updates.weekdays === undefined &&
+      updates.enabled === undefined && updates.service_start === undefined && updates.service_end === undefined;
+    let itemIdsToUpdate;
+    if (!isSlotWideUpdate || !bridgeState) {
+      itemIdsToUpdate = [itemId];
+    } else if (isTitleOnlyUpdate) {
+      itemIdsToUpdate = this._getSameDisplaySlotItemIds(bridgeState, itemId);
+    } else {
+      itemIdsToUpdate = this._getSameSlotItemIds(bridgeState, itemId);
+    }
 
     // When editing time or weekdays: if another slot already exists at that time for these entities, show error and do not save
     if (bridgeState?.attributes?.items && (updates.time !== undefined || updates.weekdays !== undefined)) {
@@ -5709,8 +6235,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           this._showSlotError(itemId, 'A slot already exists at this time and days for the selected entities.');
           return;
         }
-        const oldKey = (currentItem.time || '') + '|' + JSON.stringify(currentItem.weekdays || []);
-        const newKey = (newTime || '') + '|' + JSON.stringify(newWeekdays || []);
+        const oldKey = this._getDisplaySlotKey(currentItem);
+        const newKey = this._getDisplaySlotKey({ ...currentItem, time: newTime, weekdays: newWeekdays });
         if (oldKey !== newKey && this._expandedSlots.has(oldKey)) {
           this._expandedSlots.delete(oldKey);
           this._expandedSlots.add(newKey);
@@ -5858,10 +6384,32 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
   }
 
-  /** Delete all items in the same slot (same time + weekdays) so the whole slot is removed. */
+  _getDuplicatedSlotKeys(filteredItems) {
+    const m = new Map();
+    for (const it of filteredItems) {
+      const sk = this._slotKeyForItem(it);
+      m.set(sk, (m.get(sk) || 0) + 1);
+    }
+    return new Set([...m.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+  }
+
+  /** IDs of items in the same *display* slot (same display key). Used for Remove so only the current card's records are deleted. */
+  _getSameDisplaySlotItemIds(bridgeState, itemId) {
+    const allItems = bridgeState?.attributes?.items || [];
+    const item = allItems.find(i => i && i.id === itemId);
+    if (!item) return [itemId];
+    const entitySet = new Set(this._getEntities());
+    const filtered = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+    const dupKeys = this._getDuplicatedSlotKeys(filtered);
+    const displayKey = this._getDisplaySlotKey(item, dupKeys);
+    const same = filtered.filter(i => this._getDisplaySlotKey(i, dupKeys) === displayKey);
+    return same.map(i => i.id).filter(Boolean);
+  }
+
+  /** Delete only items in the current (display) slot — same time, weekdays, duration, mode, temp, fan, title. */
   async _deleteSlot(itemId) {
     const bridgeState = this._getBridgeState();
-    const itemIdsToDelete = bridgeState ? this._getSameSlotItemIds(bridgeState, itemId) : [itemId];
+    const itemIdsToDelete = bridgeState ? this._getSameDisplaySlotItemIds(bridgeState, itemId) : [itemId];
     for (const id of itemIdsToDelete) {
       await this._callService('delete_item', { id });
     }
@@ -6082,10 +6630,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     const bridgeState = this._getBridgeState();
     const allItems = bridgeState?.attributes?.items || [];
     const entitySet = new Set(entities);
-    const sameSlotItems = entities.length > 1 ? allItems.filter(i =>
-      i && i.temporary !== true && entitySet.has(i.entity_id) &&
-      i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
-    ) : [];
+    const filtered = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+    const dupKeys = this._getDuplicatedSlotKeys(filtered);
+    const displayKey = this._getDisplaySlotKey(item, dupKeys);
+    const sameSlotItems = entities.length > 1 ? filtered.filter(i => this._getDisplaySlotKey(i, dupKeys) === displayKey) : [];
     let entityLabel = '';
     if (entities.length > 1) {
       const names = sameSlotItems.map(i => this._hass?.states?.[i.entity_id]?.attributes?.friendly_name || i.entity_id);
@@ -6167,6 +6715,11 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     const showDuration = currentHvacMode !== 'off';
     const durationStr = showDuration ? this._formatDuration(item.duration) : '';
     const slotStatus = `${statusPrefix}, ${daysText} on ${item.time}${durationStr}`;
+
+    if (currentHvacMode === 'off') {
+      tempValue = '';
+      fanOptions = '<option value="">—</option>';
+    }
     
     // Prepare time placeholders
     const [hours, minutes] = item.time.split(':');
@@ -6248,6 +6801,19 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       const tempInput = slotCard.querySelector('[data-slot-form="temp"]');
       if (tempInput) {
         tempInput.value = tempValue;
+        if (currentHvacMode === 'off') {
+          tempInput.placeholder = '—';
+          tempInput.disabled = true;
+          tempInput.setAttribute('disabled', '');
+        }
+      }
+      if (currentHvacMode === 'off') {
+        const fanSelectOff = slotCard.querySelector('[data-slot-form="fan"]');
+        if (fanSelectOff) {
+          fanSelectOff.value = '';
+          fanSelectOff.disabled = true;
+          fanSelectOff.setAttribute('disabled', '');
+        }
       }
       
       result = tempDiv.innerHTML;
@@ -6308,19 +6874,19 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           durationWrapper.style.display = 'block';
           const durationInput = durationWrapper.querySelector('[data-action="update-duration"]');
           const durationSlider = durationWrapper.querySelector('[data-action="update-duration-slider"]');
-          const { minDuration, maxDuration } = this._getDurationConfig();
+          const { minDuration, maxDuration, durationStep } = this._getDurationConfig();
           if (durationInput) {
             durationInput.min = minDuration;
             durationInput.max = maxDuration;
-            durationInput.step = '0.5';
+            durationInput.step = String(durationStep);
           }
           if (durationSlider) {
-            durationSlider.min = minDuration;
-            durationSlider.max = maxDuration;
-            durationSlider.step = '0.5';
+            durationSlider.setAttribute('min', String(minDuration));
+            durationSlider.setAttribute('max', String(maxDuration));
+            durationSlider.setAttribute('step', String(durationStep));
           }
-          DurationSelector.setSelectedDuration(durationWrapper, minDuration);
-          DurationSelector.attachEventListeners(durationWrapper);
+          DurationSelector.setSelectedDuration(durationWrapper, minDuration, this._config);
+          DurationSelector.attachEventListeners(durationWrapper, this._config);
         } else {
           durationWrapper.style.display = 'none';
           DurationSelector.reset(durationWrapper, null);
@@ -6339,10 +6905,13 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
     const hvacModeSelect = addRoot?.querySelector('[data-slot-form="mode"]');
     if (hvacModeSelect) {
-      hvacModeSelect.addEventListener('change', () => {
+      const syncPopupModeDependent = () => {
         this._updateHvacModeWarning();
         this._syncPopupDurationVisibility();
-      });
+        this._updateAddPopupFanAndTemp();
+      };
+      hvacModeSelect.addEventListener('change', syncPopupModeDependent);
+      hvacModeSelect.addEventListener('input', syncPopupModeDependent);
     }
     this._syncPopupDurationVisibility();
     
@@ -6355,6 +6924,11 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
 
     // Item actions
+    const _bridgeState = this._getBridgeState();
+    const _allItems = _bridgeState?.attributes?.items || [];
+    const _entitySet = new Set(this._getEntities());
+    const _filtered = _allItems.filter(i => i && i.temporary !== true && _entitySet.has(i.entity_id));
+    const _dupKeys = this._getDuplicatedSlotKeys(_filtered);
     this.shadowRoot.querySelectorAll('.slot-card').forEach(itemEl => {
       const itemId = itemEl.dataset.itemId;
       const items = this._getItems();
@@ -6371,7 +6945,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         });
       }
 
-      const slotKey = (item.time || '') + '|' + JSON.stringify(item.weekdays || []);
+      const slotKey = this._getDisplaySlotKey(item, _dupKeys);
 
       // Toggle expand/collapse
       const expandBtn = itemEl.querySelector('[data-action="toggle-expand"]');
@@ -6393,7 +6967,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         });
       }
 
-      // Restore expanded state if this slot was expanded before (by time+weekdays so it survives entity add/remove)
+      // Restore expanded state if this slot was expanded before (by display key)
       if (this._expandedSlots.has(slotKey)) {
         itemEl.classList.add('expanded');
         const icon = expandBtn?.querySelector('ha-icon');
@@ -6571,10 +7145,33 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
               durationWrapper.style.display = 'none';
               DurationSelector.reset(itemEl, null);
             }
+            const tempInputSlot = itemEl.querySelector('[data-slot-form="temp"]');
+            const fanSelectSlot = itemEl.querySelector('[data-slot-form="fan"]');
+            if (tempInputSlot) {
+              tempInputSlot.value = '';
+              tempInputSlot.placeholder = '—';
+              tempInputSlot.disabled = true;
+              tempInputSlot.setAttribute('disabled', '');
+            }
+            if (fanSelectSlot) {
+              if (!fanSelectSlot.querySelector('option[value=""]')) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = '—';
+                fanSelectSlot.insertBefore(opt, fanSelectSlot.firstChild);
+              }
+              fanSelectSlot.value = '';
+              fanSelectSlot.disabled = true;
+              fanSelectSlot.setAttribute('disabled', '');
+            }
             const serviceStart = { name: 'climate.set_hvac_mode', value: { entity_id: currentItem.entity_id, hvac_mode: 'off' } };
             this._updateItem(itemId, { service_start: serviceStart, clear_duration: true });
           } else {
             if (durationEnabledSwitch) durationEnabledSwitch.checked = true;
+            const tempInputSlot = itemEl.querySelector('[data-slot-form="temp"]');
+            const fanSelectSlot = itemEl.querySelector('[data-slot-form="fan"]');
+            if (tempInputSlot) { tempInputSlot.disabled = false; tempInputSlot.removeAttribute('disabled'); }
+            if (fanSelectSlot) { fanSelectSlot.disabled = false; fanSelectSlot.removeAttribute('disabled'); }
             if (durationWrapper) {
               durationWrapper.style.display = 'block';
               const { minDuration } = this._getDurationConfig();
@@ -6638,10 +7235,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           const bridgeState = this._getBridgeState();
           const allItems = bridgeState?.attributes?.items || [];
           const entitySet = new Set(entities);
-          const sameSlotItems = allItems.filter(i =>
-            i && i.temporary !== true && entitySet.has(i.entity_id) &&
-            i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
-          );
+          const filteredForSlot = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+          const dupKeysSlot = this._getDuplicatedSlotKeys(filteredForSlot);
+          const displayKeyForSlot = this._getDisplaySlotKey(item, dupKeysSlot);
+          const sameSlotItems = filteredForSlot.filter(i => this._getDisplaySlotKey(i, dupKeysSlot) === displayKeyForSlot);
           const entityIdsToItemIds = {};
           sameSlotItems.forEach(i => { entityIdsToItemIds[i.entity_id] = i.id; });
           slotEntitiesWrap.dataset.slotEntityIds = JSON.stringify(entityIdsToItemIds);
@@ -6678,10 +7275,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
               if (open) {
                 const bridgeState = this._getBridgeState();
                 const allItems = bridgeState?.attributes?.items || [];
-                const sameSlotItemsNow = allItems.filter(i =>
-                  i && i.temporary !== true && entitySet.has(i.entity_id) &&
-                  i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
-                );
+                const filteredNow = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+                const dupKeysNow = this._getDuplicatedSlotKeys(filteredNow);
+                const displayKeyForSlot = this._getDisplaySlotKey(item, dupKeysNow);
+                const sameSlotItemsNow = filteredNow.filter(i => this._getDisplaySlotKey(i, dupKeysNow) === displayKeyForSlot);
                 const initialChecked = new Set(sameSlotItemsNow.map(i => i.entity_id));
                 const initialIds = {};
                 sameSlotItemsNow.forEach(i => { initialIds[i.entity_id] = i.id; });

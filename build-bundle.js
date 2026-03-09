@@ -43,7 +43,7 @@ function buildExtras() {
 
 function stripCardToBody(content) {
   let c = content.replace(/^\/\*\*[\s\S]*?\*\/\s*\n?/, '');
-  c = c.replace(/window\.__HOMIE_SCHEDULER_CARDS_VERSION\s*=\s*['"][^'"]*['"];\s*\n?/, '');
+  c = c.replace(/window\.__HOMIE_SCHEDULER_CARDS_VERSION\s*=\s*['"][^'"]*['"];\s*\n?/g, '');
   const sharedStart = c.indexOf('// Shared Components (auto-included from shared/)');
   if (sharedStart !== -1) {
     const classMatch = c.match(/\nclass (Homie\w+Card) extends/);
@@ -55,7 +55,6 @@ function stripCardToBody(content) {
   return c.trim();
 }
 
-let version = 'dev';
 const cardBodies = [];
 
 for (const file of CARDS) {
@@ -65,22 +64,30 @@ for (const file of CARDS) {
     process.exit(1);
   }
   const content = fs.readFileSync(filePath, 'utf8');
-  if (cardBodies.length === 0 && /window\.__HOMIE_SCHEDULER_CARDS_VERSION\s*=\s*['"]([^'"]+)['"]/.test(content)) {
-    version = content.match(/window\.__HOMIE_SCHEDULER_CARDS_VERSION\s*=\s*['"]([^'"]+)['"]/)[1];
-  }
   cardBodies.push(stripCardToBody(content));
 }
 
 const extras = buildExtras();
+let version = 'dev';
+try {
+  const changelog = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
+  const m = changelog.match(/##\s*\[([\d.]+\d)\]/);
+  if (m) version = m[1];
+} catch (_) {}
 const header = `/**
  * Homie Scheduler Cards - All-in-one bundle
- * Contains: boiler-button, boiler-status, boiler-slots, climate-slots
+ * Last build: ${new Date().toISOString()}
  * Version: ${version}
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '${version}';
 
 `;
 
-const bundle = header + (extras ? extras + '\n\n' : '') + cardBodies.join('\n\n') + '\nexport {};\n';
+let bundle = header + (extras ? extras + '\n\n' : '') + cardBodies.join('\n\n') + '\nexport {};\n';
+
+// Deduplicate SCHEDULER_SWITCH_ENTITY (each card declares it; bundle must have it once)
+const SCHEDULER_CONST = "const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';";
+bundle = bundle.split('\n').filter(line => line.trim() !== SCHEDULER_CONST).join('\n');
+bundle = bundle.replace(/(\*\/\s*\n)/, '$1\n' + SCHEDULER_CONST + '\n');
+
 fs.writeFileSync(path.join(DIST, 'homie-scheduler-cards.js'), bundle, 'utf8');
 console.log('✓ Bundle written: dist/homie-scheduler-cards.js (' + (bundle.length / 1024).toFixed(1) + ' KB)');

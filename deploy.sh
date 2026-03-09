@@ -12,6 +12,7 @@ if [[ -z "$HA_CONFIG" ]]; then
   echo "Usage: HA_CONFIG=/path/to/ha/config ./deploy.sh"
   echo "   or: ./deploy.sh /path/to/ha/config"
   echo "Example: ./deploy.sh ~/.homeassistant"
+  echo "Example (Docker in repo): ./deploy.sh ../homie-docker-config"
   exit 1
 fi
 

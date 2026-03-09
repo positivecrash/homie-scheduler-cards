@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.2]
+
+### Climate slots
+
+- **Slots with same time but different title no longer merge:** Display key and conflict checks now include title for all modes (including Off). You can add multiple slots at the same time and weekdays with different titles or modes; editing one no longer updates the other.
+- **Title-only updates** apply only to items in the same display slot (same time, weekdays, duration, mode, temp, fan, title). Other slot-wide changes (time, weekdays, duration, mode) still apply to all entities in that time slot.
+- **Add-slot conflict:** A new slot is blocked only when an identical slot exists (same time, days, mode, temperature, fan, duration, and title). Adding a slot at the same time with a different title or mode is allowed.
+
+### Bundle
+
+- **Fixed:** Duplicate `SCHEDULER_SWITCH_ENTITY` declaration in the all-in-one bundle is removed so the bundle loads without "Cannot declare a const variable twice" and configuration errors in the UI.
+
+### Compatibility
+
+- Works with Homie Scheduler Integration 1.1.0.
+
 ## [1.1.1]
 
 ### Climate slots

@@ -12,6 +12,9 @@
 
 const SCHEDULER_SWITCH_ENTITY = 'switch.homie_scheduler_enabled';
 
+// Use hours duration selector (0.5–12 h, step 0.5). In bundle, boiler loads first and sets DurationSelector = mins; climate must use DurationSelectorHours.
+const DurationSelector = window.DurationSelectorHours || window.DurationSelector;
+
 class HomieClimateScheduleSlotsCard extends HTMLElement {
   static getStubConfig() {
     return { entity: '', title: 'Schedule' };
@@ -26,7 +29,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     this._bridgeSensor = null;
     this._debounceTimer = null;
     this._htmlTemplate = null;
-    this._expandedSlots = new Set(); // Track expanded slots by key (time|weekdays) so adding/removing entities doesn't collapse
+    this._expandedSlots = new Set(); // Track expanded slots by display key (time|weekdays|duration|mode|temp|fan|title)
     this._configError = null; // Store config error message
     this._unsubStateChanged = null; // Unsubscribe function for state_changed events
     this._optimisticBridgeState = null; // Local overlay for optimistic updates (avoids mutating hass.states)
@@ -419,6 +422,26 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     return e ? [e] : [];
   }
 
+  /** Display slot key: group in one card when time, weekdays, duration, mode, temperature, fan_mode and title (or no title) match. For mode Off, duration/temperature/fan_mode/title are not used. */
+  _slotKeyForItem(item) {
+    return (item?.entity_id || '') + '|' + (item?.time || '') + '|' + JSON.stringify(item?.weekdays || []);
+  }
+
+  /** Display key: time, weekdays, duration, mode, temp, fan, title. If several items share same (entity_id, time, weekdays) — use item.id so they don't merge (e.g. one with custom title, one without). */
+  _getDisplaySlotKey(item, duplicatedSlotKeys) {
+    if (!item) return '';
+    const mode = item.service_start?.value?.hvac_mode ?? '';
+    const isOff = mode === 'off';
+    const durationPart = isOff ? '' : (item.duration ?? '');
+    const temp = item.service_start?.value?.temperature;
+    const tempStr = isOff ? '' : (temp !== undefined && temp !== null ? String(temp) : '');
+    const fan = isOff ? '' : (item.service_start?.value?.fan_mode ?? '');
+    const slotKey = this._slotKeyForItem(item);
+    const isDuplicated = duplicatedSlotKeys && duplicatedSlotKeys.has(slotKey);
+    const titlePart = isDuplicated ? (item.id || '') : (item.title || '');
+    return (item.time || '') + '|' + JSON.stringify(item.weekdays || []) + '|' + durationPart + '|' + mode + '|' + tempStr + '|' + fan + '|' + titlePart;
+  }
+
   _getItems() {
     try {
       const entities = this._getEntities();
@@ -433,10 +456,16 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         entitySet.has(item.entity_id) && 
         item.temporary !== true
       );
-      // Dedupe by (time, weekdays): when both temp and real slot exist, show only one (prefer real)
+      const slotKeyCount = new Map();
+      for (const it of filtered) {
+        const sk = this._slotKeyForItem(it);
+        slotKeyCount.set(sk, (slotKeyCount.get(sk) || 0) + 1);
+      }
+      const duplicatedSlotKeys = new Set([...slotKeyCount.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+      // Dedupe by display key: when both temp and real slot exist, show only one (prefer real)
       const byKey = new Map();
       for (const item of filtered) {
-        const key = (item.time || '') + '|' + JSON.stringify(item.weekdays || []);
+        const key = this._getDisplaySlotKey(item, duplicatedSlotKeys);
         const existing = byKey.get(key);
         const isTemp = item.id && String(item.id).startsWith('temp-');
         if (!existing) {
@@ -1103,19 +1132,40 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       this._updateHvacModeWarning();
       this._updateAddPopupFanAndTemp();
       this._syncPopupDurationVisibility();
+      requestAnimationFrame(() => {
+        this._updateAddPopupFanAndTemp();
+        this._syncPopupDurationVisibility();
+      });
     }
   }
 
   _updateAddPopupFanAndTemp() {
     const root = this._getAddFormRoot();
     if (!root || !this._hass) return;
-    const selectedIds = this._getPopupSelectedEntityIds();
-    const entityId = selectedIds.length ? selectedIds[0] : this._getEntities()[0];
+    const hvacModeSelect = root.querySelector('[data-slot-form="mode"]');
     const fanSelect = root.querySelector('[data-slot-form="fan"]');
     const tempInput = root.querySelector('[data-slot-form="temp"]');
+    const isOff = hvacModeSelect && String(hvacModeSelect.value || '').trim().toLowerCase() === 'off';
+    if (isOff) {
+      if (tempInput) {
+        tempInput.value = '';
+        tempInput.placeholder = '—';
+        tempInput.disabled = true;
+        tempInput.setAttribute('disabled', '');
+      }
+      if (fanSelect) {
+        fanSelect.innerHTML = '<option value="">—</option>';
+        fanSelect.value = '';
+        fanSelect.disabled = true;
+        fanSelect.setAttribute('disabled', '');
+      }
+      return;
+    }
+    const selectedIds = this._getPopupSelectedEntityIds();
+    const entityId = selectedIds.length ? selectedIds[0] : this._getEntities()[0];
     if (!entityId) {
-      if (fanSelect) { fanSelect.innerHTML = '<option value="">—</option>'; fanSelect.value = ''; }
-      if (tempInput) { tempInput.min = 5; tempInput.max = 35; tempInput.value = 21; tempInput.placeholder = '—'; }
+      if (fanSelect) { fanSelect.innerHTML = '<option value="">—</option>'; fanSelect.value = ''; fanSelect.disabled = false; fanSelect.removeAttribute('disabled'); }
+      if (tempInput) { tempInput.min = 5; tempInput.max = 35; tempInput.value = 21; tempInput.placeholder = '—'; tempInput.disabled = false; tempInput.removeAttribute('disabled'); }
       return;
     }
     const state = this._hass.states[entityId];
@@ -1143,7 +1193,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       tempInput.step = attrs.target_temp_step ?? 0.5;
       tempInput.value = Math.max(min, Math.min(max, val));
       tempInput.placeholder = '—';
+      tempInput.disabled = false;
+      tempInput.removeAttribute('disabled');
     }
+    if (fanSelect) { fanSelect.disabled = false; fanSelect.removeAttribute('disabled'); }
   }
 
   _showAddPopupError(message) {
@@ -1170,13 +1223,33 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     return (b || []).some(d => setA.has(d));
   }
 
-  /** True if a slot already exists at (time) for any selected entity with at least one weekday overlapping. */
-  _hasAddSlotConflict(bridgeState, time, weekdays, selectedEntityIds) {
+  /** Content key for conflict detection: time, weekdays, mode, temp, fan, duration, title. */
+  _slotContentKey(data) {
+    const mode = data.service_start?.value?.hvac_mode ?? data.hvac_mode ?? '';
+    const isOff = mode === 'off';
+    const dur = isOff ? '' : (data.duration ?? '');
+    const temp = data.service_start?.value?.temperature ?? data.temperature;
+    const tempStr = isOff ? '' : (temp != null ? String(temp) : '');
+    const fan = isOff ? '' : (data.service_start?.value?.fan_mode ?? data.fan_mode ?? '');
+    const slotTitle = data.title ?? '';
+    return (data.time || '') + '|' + JSON.stringify(data.weekdays || []) + '|' + dur + '|' + mode + '|' + tempStr + '|' + fan + '|' + slotTitle;
+  }
+
+  /** True if a slot with same content (time, weekdays, mode, temp, fan, duration, title) already exists for any selected entity. */
+  _hasAddSlotConflict(bridgeState, time, weekdays, selectedEntityIds, newSlotData) {
     const allItems = bridgeState?.attributes?.items || [];
     const entitySet = new Set(selectedEntityIds);
+    if (!newSlotData) {
+      return allItems.some(i =>
+        i && !i.temporary && entitySet.has(i.entity_id) &&
+        i.time === time && this._weekdaysOverlap(weekdays, i.weekdays)
+      );
+    }
+    const newKey = this._slotContentKey({ ...newSlotData, time, weekdays });
     return allItems.some(i =>
       i && !i.temporary && entitySet.has(i.entity_id) &&
-      i.time === time && this._weekdaysOverlap(weekdays, i.weekdays)
+      i.time === time && this._weekdaysOverlap(weekdays, i.weekdays) &&
+      this._slotContentKey(i) === newKey
     );
   }
 
@@ -1240,12 +1313,6 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
     this._clearAddPopupError();
 
-    const bridgeState = this._getBridgeState();
-    if (this._hasAddSlotConflict(bridgeState, time, selectedDays, selectedEntityIds)) {
-      this._showAddPopupError('A slot already exists at this time and days for the selected entities.');
-      return;
-    }
-
     const fanSelect = root.querySelector('[data-slot-form="fan"]');
     const tempInput = root.querySelector('[data-slot-form="temp"]');
     const fanMode = fanSelect?.value || undefined;
@@ -1253,6 +1320,14 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     if (tempInput && tempInput.value !== '' && !Number.isNaN(Number(tempInput.value))) {
       temperature = parseFloat(tempInput.value);
     }
+
+    const bridgeState = this._getBridgeState();
+    const newSlotData = { time, weekdays: selectedDays, duration: durationValue, hvac_mode: hvacMode, temperature, fan_mode: fanMode, title };
+    if (this._hasAddSlotConflict(bridgeState, time, selectedDays, selectedEntityIds, newSlotData)) {
+      this._showAddPopupError('A slot with the same time, days, mode, and title already exists.');
+      return;
+    }
+
     const climateServicesByEntity = {};
     selectedEntityIds.forEach(eid => {
       climateServicesByEntity[eid] = ScheduleHelper.createClimateServices(eid, hvacMode, { temperature, fan_mode: fanMode });
@@ -1337,7 +1412,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     this._closeAddPopup();
   }
 
-  /** Climate duration limits (hours): fixed in code, not from dashboard config. */
+  /** Climate duration defaults (hours); actual values come from card config min_duration/max_duration/duration_step. */
   static get CLIMATE_DURATION_MIN() { return 0.5; }
   static get CLIMATE_DURATION_MAX() { return 12; }
   static get CLIMATE_DURATION_STEP() { return 0.5; }
@@ -1357,11 +1432,11 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     target.duration_step = source.duration_step ?? this.constructor.CLIMATE_DURATION_STEP;
   }
 
-  /** Duration config in hours: fixed 0.5–12, step 0.5 (same role as boiler _getDurationConfig but values hardcoded for climate). */
+  /** Duration config in hours: from card config (min_duration, max_duration, duration_step), same mechanism as boiler. */
   _getDurationConfig() {
-    const minDuration = this.constructor.CLIMATE_DURATION_MIN;
-    const maxDuration = this.constructor.CLIMATE_DURATION_MAX;
-    const durationStep = this.constructor.CLIMATE_DURATION_STEP;
+    const minDuration = this._config?.min_duration ?? this.constructor.CLIMATE_DURATION_MIN;
+    const maxDuration = this._config?.max_duration ?? this.constructor.CLIMATE_DURATION_MAX;
+    const durationStep = this._config?.duration_step ?? this.constructor.CLIMATE_DURATION_STEP;
     return { minDuration, maxDuration, durationStep };
   }
 
@@ -1573,17 +1648,44 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       }
     }
 
-    // Update Fan and Temp from service_start
+    // Update Fan and Temp from service_start (when mode is Off: show — and disabled)
+    const currentHvacModeSync = updatedItem.service_start?.value?.hvac_mode;
     const fanSelect = slotCard.querySelector('[data-slot-form="fan"]');
-    if (fanSelect && updatedItem.service_start?.value?.fan_mode != null) {
-      if (fanSelect.querySelector(`option[value="${updatedItem.service_start.value.fan_mode}"]`)) {
-        fanSelect.value = updatedItem.service_start.value.fan_mode;
-      }
-    }
     const tempInput = slotCard.querySelector('[data-slot-form="temp"]');
-    if (tempInput && updatedItem.service_start?.value?.temperature != null) {
-      const t = Number(updatedItem.service_start.value.temperature);
-      if (!Number.isNaN(t)) tempInput.value = t;
+    if (currentHvacModeSync === 'off') {
+      if (tempInput) {
+        tempInput.value = '';
+        tempInput.placeholder = '—';
+        tempInput.disabled = true;
+        tempInput.setAttribute('disabled', '');
+      }
+      if (fanSelect) {
+        if (!fanSelect.querySelector('option[value=""]')) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '—';
+          fanSelect.insertBefore(opt, fanSelect.firstChild);
+        }
+        fanSelect.value = '';
+        fanSelect.disabled = true;
+        fanSelect.setAttribute('disabled', '');
+      }
+    } else {
+      if (tempInput) {
+        tempInput.disabled = false;
+        tempInput.removeAttribute('disabled');
+        if (updatedItem.service_start?.value?.temperature != null) {
+          const t = Number(updatedItem.service_start.value.temperature);
+          if (!Number.isNaN(t)) tempInput.value = t;
+        }
+      }
+      if (fanSelect) {
+        fanSelect.disabled = false;
+        fanSelect.removeAttribute('disabled');
+        if (updatedItem.service_start?.value?.fan_mode != null && fanSelect.querySelector(`option[value="${updatedItem.service_start.value.fan_mode}"]`)) {
+          fanSelect.value = updatedItem.service_start.value.fan_mode;
+        }
+      }
     }
 
     // Update weekday selector state
@@ -1669,7 +1771,19 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       updates.service_start !== undefined ||
       updates.service_end !== undefined
     );
-    const itemIdsToUpdate = isSlotWideUpdate && bridgeState ? this._getSameSlotItemIds(bridgeState, itemId) : [itemId];
+    // Title-only update: match by display key (so slots with different titles stay separate).
+    // Other slot-wide updates (time/weekdays/duration/mode/enabled): match by time+weekdays (all entities in that position).
+    const isTitleOnlyUpdate = isSlotWideUpdate && updates.title !== undefined &&
+      updates.time === undefined && updates.duration === undefined && updates.weekdays === undefined &&
+      updates.enabled === undefined && updates.service_start === undefined && updates.service_end === undefined;
+    let itemIdsToUpdate;
+    if (!isSlotWideUpdate || !bridgeState) {
+      itemIdsToUpdate = [itemId];
+    } else if (isTitleOnlyUpdate) {
+      itemIdsToUpdate = this._getSameDisplaySlotItemIds(bridgeState, itemId);
+    } else {
+      itemIdsToUpdate = this._getSameSlotItemIds(bridgeState, itemId);
+    }
 
     // When editing time or weekdays: if another slot already exists at that time for these entities, show error and do not save
     if (bridgeState?.attributes?.items && (updates.time !== undefined || updates.weekdays !== undefined)) {
@@ -1681,8 +1795,8 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           this._showSlotError(itemId, 'A slot already exists at this time and days for the selected entities.');
           return;
         }
-        const oldKey = (currentItem.time || '') + '|' + JSON.stringify(currentItem.weekdays || []);
-        const newKey = (newTime || '') + '|' + JSON.stringify(newWeekdays || []);
+        const oldKey = this._getDisplaySlotKey(currentItem);
+        const newKey = this._getDisplaySlotKey({ ...currentItem, time: newTime, weekdays: newWeekdays });
         if (oldKey !== newKey && this._expandedSlots.has(oldKey)) {
           this._expandedSlots.delete(oldKey);
           this._expandedSlots.add(newKey);
@@ -1830,10 +1944,32 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
   }
 
-  /** Delete all items in the same slot (same time + weekdays) so the whole slot is removed. */
+  _getDuplicatedSlotKeys(filteredItems) {
+    const m = new Map();
+    for (const it of filteredItems) {
+      const sk = this._slotKeyForItem(it);
+      m.set(sk, (m.get(sk) || 0) + 1);
+    }
+    return new Set([...m.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+  }
+
+  /** IDs of items in the same *display* slot (same display key). Used for Remove so only the current card's records are deleted. */
+  _getSameDisplaySlotItemIds(bridgeState, itemId) {
+    const allItems = bridgeState?.attributes?.items || [];
+    const item = allItems.find(i => i && i.id === itemId);
+    if (!item) return [itemId];
+    const entitySet = new Set(this._getEntities());
+    const filtered = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+    const dupKeys = this._getDuplicatedSlotKeys(filtered);
+    const displayKey = this._getDisplaySlotKey(item, dupKeys);
+    const same = filtered.filter(i => this._getDisplaySlotKey(i, dupKeys) === displayKey);
+    return same.map(i => i.id).filter(Boolean);
+  }
+
+  /** Delete only items in the current (display) slot — same time, weekdays, duration, mode, temp, fan, title. */
   async _deleteSlot(itemId) {
     const bridgeState = this._getBridgeState();
-    const itemIdsToDelete = bridgeState ? this._getSameSlotItemIds(bridgeState, itemId) : [itemId];
+    const itemIdsToDelete = bridgeState ? this._getSameDisplaySlotItemIds(bridgeState, itemId) : [itemId];
     for (const id of itemIdsToDelete) {
       await this._callService('delete_item', { id });
     }
@@ -2054,10 +2190,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     const bridgeState = this._getBridgeState();
     const allItems = bridgeState?.attributes?.items || [];
     const entitySet = new Set(entities);
-    const sameSlotItems = entities.length > 1 ? allItems.filter(i =>
-      i && i.temporary !== true && entitySet.has(i.entity_id) &&
-      i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
-    ) : [];
+    const filtered = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+    const dupKeys = this._getDuplicatedSlotKeys(filtered);
+    const displayKey = this._getDisplaySlotKey(item, dupKeys);
+    const sameSlotItems = entities.length > 1 ? filtered.filter(i => this._getDisplaySlotKey(i, dupKeys) === displayKey) : [];
     let entityLabel = '';
     if (entities.length > 1) {
       const names = sameSlotItems.map(i => this._hass?.states?.[i.entity_id]?.attributes?.friendly_name || i.entity_id);
@@ -2139,6 +2275,11 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     const showDuration = currentHvacMode !== 'off';
     const durationStr = showDuration ? this._formatDuration(item.duration) : '';
     const slotStatus = `${statusPrefix}, ${daysText} on ${item.time}${durationStr}`;
+
+    if (currentHvacMode === 'off') {
+      tempValue = '';
+      fanOptions = '<option value="">—</option>';
+    }
     
     // Prepare time placeholders
     const [hours, minutes] = item.time.split(':');
@@ -2220,6 +2361,19 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
       const tempInput = slotCard.querySelector('[data-slot-form="temp"]');
       if (tempInput) {
         tempInput.value = tempValue;
+        if (currentHvacMode === 'off') {
+          tempInput.placeholder = '—';
+          tempInput.disabled = true;
+          tempInput.setAttribute('disabled', '');
+        }
+      }
+      if (currentHvacMode === 'off') {
+        const fanSelectOff = slotCard.querySelector('[data-slot-form="fan"]');
+        if (fanSelectOff) {
+          fanSelectOff.value = '';
+          fanSelectOff.disabled = true;
+          fanSelectOff.setAttribute('disabled', '');
+        }
       }
       
       result = tempDiv.innerHTML;
@@ -2280,19 +2434,19 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           durationWrapper.style.display = 'block';
           const durationInput = durationWrapper.querySelector('[data-action="update-duration"]');
           const durationSlider = durationWrapper.querySelector('[data-action="update-duration-slider"]');
-          const { minDuration, maxDuration } = this._getDurationConfig();
+          const { minDuration, maxDuration, durationStep } = this._getDurationConfig();
           if (durationInput) {
             durationInput.min = minDuration;
             durationInput.max = maxDuration;
-            durationInput.step = '0.5';
+            durationInput.step = String(durationStep);
           }
           if (durationSlider) {
-            durationSlider.min = minDuration;
-            durationSlider.max = maxDuration;
-            durationSlider.step = '0.5';
+            durationSlider.setAttribute('min', String(minDuration));
+            durationSlider.setAttribute('max', String(maxDuration));
+            durationSlider.setAttribute('step', String(durationStep));
           }
-          DurationSelector.setSelectedDuration(durationWrapper, minDuration);
-          DurationSelector.attachEventListeners(durationWrapper);
+          DurationSelector.setSelectedDuration(durationWrapper, minDuration, this._config);
+          DurationSelector.attachEventListeners(durationWrapper, this._config);
         } else {
           durationWrapper.style.display = 'none';
           DurationSelector.reset(durationWrapper, null);
@@ -2311,10 +2465,13 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
 
     const hvacModeSelect = addRoot?.querySelector('[data-slot-form="mode"]');
     if (hvacModeSelect) {
-      hvacModeSelect.addEventListener('change', () => {
+      const syncPopupModeDependent = () => {
         this._updateHvacModeWarning();
         this._syncPopupDurationVisibility();
-      });
+        this._updateAddPopupFanAndTemp();
+      };
+      hvacModeSelect.addEventListener('change', syncPopupModeDependent);
+      hvacModeSelect.addEventListener('input', syncPopupModeDependent);
     }
     this._syncPopupDurationVisibility();
     
@@ -2327,6 +2484,11 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
     }
 
     // Item actions
+    const _bridgeState = this._getBridgeState();
+    const _allItems = _bridgeState?.attributes?.items || [];
+    const _entitySet = new Set(this._getEntities());
+    const _filtered = _allItems.filter(i => i && i.temporary !== true && _entitySet.has(i.entity_id));
+    const _dupKeys = this._getDuplicatedSlotKeys(_filtered);
     this.shadowRoot.querySelectorAll('.slot-card').forEach(itemEl => {
       const itemId = itemEl.dataset.itemId;
       const items = this._getItems();
@@ -2343,7 +2505,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         });
       }
 
-      const slotKey = (item.time || '') + '|' + JSON.stringify(item.weekdays || []);
+      const slotKey = this._getDisplaySlotKey(item, _dupKeys);
 
       // Toggle expand/collapse
       const expandBtn = itemEl.querySelector('[data-action="toggle-expand"]');
@@ -2365,7 +2527,7 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
         });
       }
 
-      // Restore expanded state if this slot was expanded before (by time+weekdays so it survives entity add/remove)
+      // Restore expanded state if this slot was expanded before (by display key)
       if (this._expandedSlots.has(slotKey)) {
         itemEl.classList.add('expanded');
         const icon = expandBtn?.querySelector('ha-icon');
@@ -2543,10 +2705,33 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
               durationWrapper.style.display = 'none';
               DurationSelector.reset(itemEl, null);
             }
+            const tempInputSlot = itemEl.querySelector('[data-slot-form="temp"]');
+            const fanSelectSlot = itemEl.querySelector('[data-slot-form="fan"]');
+            if (tempInputSlot) {
+              tempInputSlot.value = '';
+              tempInputSlot.placeholder = '—';
+              tempInputSlot.disabled = true;
+              tempInputSlot.setAttribute('disabled', '');
+            }
+            if (fanSelectSlot) {
+              if (!fanSelectSlot.querySelector('option[value=""]')) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = '—';
+                fanSelectSlot.insertBefore(opt, fanSelectSlot.firstChild);
+              }
+              fanSelectSlot.value = '';
+              fanSelectSlot.disabled = true;
+              fanSelectSlot.setAttribute('disabled', '');
+            }
             const serviceStart = { name: 'climate.set_hvac_mode', value: { entity_id: currentItem.entity_id, hvac_mode: 'off' } };
             this._updateItem(itemId, { service_start: serviceStart, clear_duration: true });
           } else {
             if (durationEnabledSwitch) durationEnabledSwitch.checked = true;
+            const tempInputSlot = itemEl.querySelector('[data-slot-form="temp"]');
+            const fanSelectSlot = itemEl.querySelector('[data-slot-form="fan"]');
+            if (tempInputSlot) { tempInputSlot.disabled = false; tempInputSlot.removeAttribute('disabled'); }
+            if (fanSelectSlot) { fanSelectSlot.disabled = false; fanSelectSlot.removeAttribute('disabled'); }
             if (durationWrapper) {
               durationWrapper.style.display = 'block';
               const { minDuration } = this._getDurationConfig();
@@ -2610,10 +2795,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
           const bridgeState = this._getBridgeState();
           const allItems = bridgeState?.attributes?.items || [];
           const entitySet = new Set(entities);
-          const sameSlotItems = allItems.filter(i =>
-            i && i.temporary !== true && entitySet.has(i.entity_id) &&
-            i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
-          );
+          const filteredForSlot = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+          const dupKeysSlot = this._getDuplicatedSlotKeys(filteredForSlot);
+          const displayKeyForSlot = this._getDisplaySlotKey(item, dupKeysSlot);
+          const sameSlotItems = filteredForSlot.filter(i => this._getDisplaySlotKey(i, dupKeysSlot) === displayKeyForSlot);
           const entityIdsToItemIds = {};
           sameSlotItems.forEach(i => { entityIdsToItemIds[i.entity_id] = i.id; });
           slotEntitiesWrap.dataset.slotEntityIds = JSON.stringify(entityIdsToItemIds);
@@ -2650,10 +2835,10 @@ class HomieClimateScheduleSlotsCard extends HTMLElement {
               if (open) {
                 const bridgeState = this._getBridgeState();
                 const allItems = bridgeState?.attributes?.items || [];
-                const sameSlotItemsNow = allItems.filter(i =>
-                  i && i.temporary !== true && entitySet.has(i.entity_id) &&
-                  i.time === item.time && JSON.stringify(i.weekdays || []) === JSON.stringify(item.weekdays || [])
-                );
+                const filteredNow = allItems.filter(i => i && i.temporary !== true && entitySet.has(i.entity_id));
+                const dupKeysNow = this._getDuplicatedSlotKeys(filteredNow);
+                const displayKeyForSlot = this._getDisplaySlotKey(item, dupKeysNow);
+                const sameSlotItemsNow = filteredNow.filter(i => this._getDisplaySlotKey(i, dupKeysNow) === displayKeyForSlot);
                 const initialChecked = new Set(sameSlotItemsNow.map(i => i.entity_id));
                 const initialIds = {};
                 sameSlotItemsNow.forEach(i => { initialIds[i.entity_id] = i.id; });

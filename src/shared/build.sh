@@ -51,7 +51,6 @@ let htmlTemplate = fs.readFileSync('card-template.html', 'utf8');
 const sharedBase = '../../shared';
 let sharedJs = '';
 const outputFile = process.env.OUTPUT_FILE || '';
-const durationVariant = outputFile.includes('climate') ? 'hours' : 'mins';
 
 if (fs.existsSync(sharedBase)) {
   const sharedDirs = fs.readdirSync(sharedBase, { withFileTypes: true })
@@ -59,15 +58,9 @@ if (fs.existsSync(sharedBase)) {
     .map(dirent => dirent.name);
   
   for (const dir of sharedDirs) {
-    let dirPath = path.join(sharedBase, dir);
-    // selector-duration: include mins (boiler) or hours (climate) subfolder only
-    if (dir === 'selector-duration') {
-      dirPath = path.join(sharedBase, dir, durationVariant);
-      if (!fs.existsSync(dirPath)) continue;
-    }
+    const dirPath = path.join(sharedBase, dir);
     const files = fs.existsSync(dirPath) ? fs.readdirSync(dirPath) : [];
-    
-    const displayDir = dir === 'selector-duration' ? `selector-duration/${durationVariant}` : dir;
+    const displayDir = dir;
     // Include .js files only
     const jsFiles = files.filter(f => f.endsWith('.js'));
     for (const jsFile of jsFiles) {
@@ -216,7 +209,7 @@ if (loadTemplateMatch) {
   }
 }
 
-// Add header: card name, last build, version (from CHANGELOG or env)
+// Header: card name, last build, version in comment only (no global variable)
 let cardName = 'Homie Schedule Card';
 if (outputFile) {
   const nameParts = outputFile.replace('.js', '').split('-');
@@ -242,7 +235,6 @@ const header = `/**
  * Last build: ${lastBuild}
  * Version: ${releaseVer}
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '${releaseVer}';
 
 `;
 

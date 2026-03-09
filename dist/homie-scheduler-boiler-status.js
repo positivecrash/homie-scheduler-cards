@@ -1,25 +1,19 @@
 /**
  * Scheduler Boiler Status Card
- * Last build: 2026-03-04T20:10:24.386Z
+ * Last build: 2026-03-06T12:34:01.784Z
  * Version: 1.1.1
  */
-window.__HOMIE_SCHEDULER_CARDS_VERSION = '1.1.1';
 
 // Shared Components (auto-included from shared/)
 // Shared component: card-console-info/card-console-info.js
 /**
  * Shared console info for Homie Scheduler cards.
- * Logs branded card name and release version (set at build time).
- * Uses window.logCardInfo so the bundle can include this file multiple times (one per card) without redeclaration error.
+ * Logs branded card name. No version in resources to avoid cache sticking to old builds.
  */
 if (typeof window.logCardInfo === 'undefined') {
   window.logCardInfo = function (cardName) {
-    var version = typeof window.__HOMIE_SCHEDULER_CARDS_VERSION !== 'undefined'
-      ? window.__HOMIE_SCHEDULER_CARDS_VERSION
-      : 'dev';
-    var label = cardName + ' v' + version;
     console.info(
-      '%c Homie Scheduler %c ' + label,
+      '%c Homie Scheduler %c ' + cardName,
       'color: white; background:rgb(94, 94, 243); font-weight: 700; padding 5px;',
       'color: rgb(94, 94, 243); background: white; font-weight: 700; padding 5px;'
     );
@@ -379,15 +373,16 @@ if (typeof window.ScheduleHelper === 'undefined') {
   // Already assigned to window.ScheduleHelper above, no need to reassign
 }
 
-// Shared component: selector-duration/mins/duration-selector.js
+// Shared component: selector-duration/selector-duration.js
 /**
- * Duration Selector (minutes)
- * Slider + number input, duration in minutes. Used by boiler schedule card.
+ * Duration Selector — shared module.
+ * Two variants: DurationSelectorMins (boiler, minutes) and DurationSelectorHours (climate, hours).
+ * In bundle, boiler loads first and sets window.DurationSelector = Mins; climate uses window.DurationSelectorHours.
  */
 
-// Prevent duplicate class declaration when multiple cards are loaded
-if (typeof window.DurationSelector === 'undefined') {
-  window.DurationSelector = class DurationSelector {
+// --- Minutes variant (boiler: 15–1440 min, step 15) ---
+
+const DurationSelectorMins = class DurationSelector {
   static computeStep(min, max, preferredStep = 15) {
     const range = max - min;
     if (range <= 0) return 1;
@@ -429,13 +424,13 @@ if (typeof window.DurationSelector === 'undefined') {
       const input = wrapper.querySelector('[data-action="update-duration"]');
       if (input) {
         const value = input.value;
-        return value && value !== '' ? parseInt(value) : null;
+        return value && value !== '' ? parseInt(value, 10) : null;
       }
     }
     const input = shadowRoot.querySelector('[data-action="update-duration"]');
     if (!input) return null;
     const value = input.value;
-    return value && value !== '' ? parseInt(value) : null;
+    return value && value !== '' ? parseInt(value, 10) : null;
   }
 
   static setSelectedDuration(shadowRoot, duration) {
@@ -586,8 +581,215 @@ if (typeof window.DurationSelector === 'undefined') {
       newSlider.addEventListener('click', (e) => e.stopPropagation());
     }
   }
-  };
-}
+};
+
+// --- Hours variant (climate: 0.5–12 h, step 0.5) ---
+
+const HOURS_MIN = 0.5;
+const HOURS_MAX = 12;
+const HOURS_STEP = 0.5;
+
+const DurationSelectorHours = class DurationSelector {
+  static computeStep(min, max, preferredStep = 0.5) {
+    return preferredStep;
+  }
+
+  static getSelectedDuration(shadowRoot) {
+    let wrapper = null;
+    if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
+      wrapper = shadowRoot;
+    } else {
+      wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
+    }
+    if (wrapper) {
+      const input = wrapper.querySelector('[data-action="update-duration"]');
+      if (input) {
+        const value = input.value;
+        if (value === '' || value == null) return null;
+        const h = parseFloat(value);
+        return Number.isNaN(h) ? null : h;
+      }
+    }
+    const input = shadowRoot.querySelector('[data-action="update-duration"]');
+    if (!input) return null;
+    const value = input.value;
+    if (value === '' || value == null) return null;
+    const h = parseFloat(value);
+    return Number.isNaN(h) ? null : h;
+  }
+
+  static setSelectedDuration(shadowRoot, duration, config = null) {
+    const wrapper = shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')
+      ? shadowRoot
+      : shadowRoot.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || shadowRoot).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || shadowRoot).querySelector('[data-action="update-duration-slider"]');
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
+    const num = duration != null && duration !== '' ? parseFloat(duration) : NaN;
+    const val = Number.isNaN(num) ? '' : Math.max(minH, Math.min(maxH, num));
+    if (input) {
+      input.value = val !== '' ? String(val) : '';
+    }
+    if (slider) {
+      slider.value = val !== '' ? String(val) : '';
+    }
+  }
+
+  static reset(shadowRoot, defaultDuration = null) {
+    this.setSelectedDuration(shadowRoot, defaultDuration);
+  }
+
+  static attachEventListeners(shadowRoot, config = null) {
+    let wrapper = null;
+    if (shadowRoot && shadowRoot.classList && shadowRoot.classList.contains('duration-selector-wrapper')) {
+      wrapper = shadowRoot;
+    } else {
+      wrapper = shadowRoot.querySelector('.duration-selector-wrapper');
+    }
+    if (!wrapper) return;
+    const input = wrapper.querySelector('[data-action="update-duration"]');
+    const slider = wrapper.querySelector('[data-action="update-duration-slider"]');
+    if (!input || !slider) return;
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
+    const stepH = config?.duration_step ?? HOURS_STEP;
+    const newInput = input.cloneNode(true);
+    const newSlider = slider.cloneNode(true);
+    input.parentNode.replaceChild(newInput, input);
+    slider.parentNode.replaceChild(newSlider, slider);
+    newInput.min = minH;
+    newInput.max = maxH;
+    newInput.step = String(stepH);
+    newSlider.setAttribute('min', String(minH));
+    newSlider.setAttribute('max', String(maxH));
+    newSlider.setAttribute('step', String(stepH));
+    let currentHours = parseFloat(newInput.value);
+    if (Number.isNaN(currentHours)) currentHours = minH;
+    newSlider.value = String(currentHours);
+    const sliderInputHandler = (e) => {
+      const val = parseFloat(e.target.value);
+      currentHours = Number.isNaN(val) ? minH : Math.max(minH, Math.min(maxH, val));
+      newInput.value = String(currentHours);
+      newInput.setAttribute('value', newInput.value);
+    };
+    newSlider.addEventListener('input', sliderInputHandler);
+    newSlider.addEventListener('change', sliderInputHandler);
+    const inputChangeHandler = (e) => {
+      const value = parseFloat(e.target.value);
+      if (!isNaN(value)) {
+        currentHours = Math.max(minH, Math.min(maxH, value));
+        newSlider.value = String(currentHours);
+        newInput.setAttribute('value', String(currentHours));
+      }
+    };
+    newInput.addEventListener('input', inputChangeHandler);
+    newInput.addEventListener('change', inputChangeHandler);
+    newInput.addEventListener('click', (e) => e.stopPropagation());
+    newSlider.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  static getInputFromSlot(slotCard) {
+    return slotCard.querySelector('[data-action="update-duration"]');
+  }
+
+  static setDurationInSlot(slotCard, duration, config = null) {
+    const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
+      ? slotCard
+      : slotCard.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
+    const stepH = config?.duration_step ?? HOURS_STEP;
+    if (input) {
+      input.min = minH;
+      input.max = maxH;
+      input.step = String(stepH);
+    }
+    if (slider) {
+      slider.setAttribute('min', String(minH));
+      slider.setAttribute('max', String(maxH));
+      slider.setAttribute('step', String(stepH));
+    }
+    const num = duration != null && duration !== '' ? parseFloat(duration) : NaN;
+    const val = Number.isNaN(num) ? '' : Math.max(minH, Math.min(maxH, num));
+    if (input) {
+      input.value = val !== '' ? String(val) : '';
+    }
+    if (slider) {
+      slider.value = val !== '' ? String(val) : '';
+    }
+  }
+
+  static attachEventListenersInSlot(slotCard, onChangeCallback, config = null) {
+    const wrapper = slotCard.classList && slotCard.classList.contains('duration-selector-wrapper')
+      ? slotCard
+      : slotCard.querySelector('.duration-selector-wrapper');
+    const input = (wrapper || slotCard).querySelector('[data-action="update-duration"]');
+    const slider = (wrapper || slotCard).querySelector('[data-action="update-duration-slider"]');
+    const minH = config?.min_duration ?? HOURS_MIN;
+    const maxH = config?.max_duration ?? HOURS_MAX;
+    const stepH = config?.duration_step ?? HOURS_STEP;
+    if (input) {
+      input.min = minH;
+      input.max = maxH;
+      input.step = String(stepH);
+    }
+    if (slider) {
+      slider.setAttribute('min', String(minH));
+      slider.setAttribute('max', String(maxH));
+      slider.setAttribute('step', String(stepH));
+    }
+    if (input && slider) {
+      const newInput = input.cloneNode(true);
+      const newSlider = slider.cloneNode(true);
+      input.parentNode.replaceChild(newInput, input);
+      slider.parentNode.replaceChild(newSlider, slider);
+      newInput.min = minH;
+      newInput.max = maxH;
+      newInput.step = String(stepH);
+      newSlider.setAttribute('min', String(minH));
+      newSlider.setAttribute('max', String(maxH));
+      newSlider.setAttribute('step', String(stepH));
+      let currentHours = parseFloat(newInput.value);
+      if (isNaN(currentHours)) currentHours = minH;
+      newSlider.value = String(currentHours);
+      const sliderHandler = (e) => {
+        const val = parseFloat(e.target.value);
+        currentHours = Number.isNaN(val) ? minH : Math.max(minH, Math.min(maxH, val));
+        newInput.value = String(currentHours);
+        newInput.setAttribute('value', newInput.value);
+        if (onChangeCallback) onChangeCallback(currentHours);
+      };
+      const inputHandler = (e) => {
+        const value = parseFloat(e.target.value);
+        if (!isNaN(value)) {
+          currentHours = Math.max(minH, Math.min(maxH, value));
+          newSlider.value = String(currentHours);
+          newInput.setAttribute('value', newInput.value);
+        }
+      };
+      const blurHandler = () => {
+        if (!isNaN(currentHours)) {
+          newInput.value = String(currentHours);
+          newInput.setAttribute('value', newInput.value);
+          if (onChangeCallback) onChangeCallback(currentHours);
+        }
+      };
+      newSlider.addEventListener('input', sliderHandler);
+      newSlider.addEventListener('change', sliderHandler);
+      newInput.addEventListener('input', inputHandler);
+      newInput.addEventListener('blur', blurHandler);
+      newInput.addEventListener('click', (e) => e.stopPropagation());
+      newSlider.addEventListener('click', (e) => e.stopPropagation());
+    }
+  }
+};
+
+// Globals: boiler uses DurationSelector (mins); climate uses DurationSelectorHours. One script in bundle sets both.
+window.DurationSelectorHours = DurationSelectorHours;
+window.DurationSelector = DurationSelectorMins;
 
 // Shared component: selector-weekday/weekday-selector.js
 /**
